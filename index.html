@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#12140F">
+<meta name="description" content="Absensi selfie dengan lokasi akurat untuk sales freelance CDN">
+<title>Absen — PT CDN</title>
+
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Absen">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===== SPLASH / LOADING ===== -->
+<div id="splash" class="splash">
+  <div class="splash-mark">
+    <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+      <path d="M28 4L48 15V37L28 52L8 37V15L28 4Z" stroke="#7FB069" stroke-width="2.5" fill="none"/>
+      <circle cx="28" cy="26" r="9" stroke="#7FB069" stroke-width="2.5"/>
+      <circle cx="28" cy="26" r="2.5" fill="#7FB069"/>
+    </svg>
+  </div>
+  <div class="splash-text">ABSEN</div>
+  <div class="splash-sub">PT Capella Dinamik Nusantara</div>
+</div>
+
+<!-- ===== SCREEN: SELECT EMPLOYEE ===== -->
+<div id="screen-login" class="screen">
+  <header class="topbar">
+    <div class="topbar-mark">
+      <svg width="22" height="22" viewBox="0 0 56 56" fill="none">
+        <path d="M28 4L48 15V37L28 52L8 37V15L28 4Z" stroke="currentColor" stroke-width="3" fill="none"/>
+        <circle cx="28" cy="26" r="9" stroke="currentColor" stroke-width="3"/>
+      </svg>
+    </div>
+    <div class="topbar-title">
+      <span class="topbar-title-main">Absen</span>
+      <span class="topbar-title-sub">CDN Field Team</span>
+    </div>
+  </header>
+
+  <div class="login-body">
+    <h1 class="login-heading">Siapa kamu hari ini?</h1>
+    <p class="login-caption">Pilih nama untuk mulai absensi</p>
+
+    <div class="search-field">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M21 21L16.5 16.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="employee-search" type="text" placeholder="Cari nama..." autocomplete="off">
+    </div>
+
+    <div id="employee-list" class="employee-list">
+      <!-- populated by app.js -->
+    </div>
+
+    <div id="employee-empty" class="employee-empty hidden">
+      <p>Belum ada data karyawan.</p>
+      <p class="employee-empty-sub">Hubungi admin untuk mendaftarkan nama kamu.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCREEN: HOME / DASHBOARD ===== -->
+<div id="screen-home" class="screen">
+  <header class="topbar topbar-home">
+    <button id="btn-logout" class="icon-btn" aria-label="Ganti pengguna">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="topbar-title topbar-title-center">
+      <span class="topbar-title-main" id="home-employee-name">—</span>
+      <span class="topbar-title-sub" id="home-employee-branch">—</span>
+    </div>
+    <div class="topbar-spacer"></div>
+  </header>
+
+  <div class="home-body">
+    <div class="clock-block">
+      <div class="clock-time" id="live-clock">--:--</div>
+      <div class="clock-date" id="live-date">—</div>
+    </div>
+
+    <div class="status-rail">
+      <div class="status-card" id="card-masuk">
+        <div class="status-card-head">
+          <span class="status-dot"></span>
+          <span class="status-label">Absen Masuk</span>
+        </div>
+        <div class="status-value" id="status-masuk-time">Belum absen</div>
+        <div class="status-detail" id="status-masuk-addr"></div>
+      </div>
+      <div class="status-card" id="card-keluar">
+        <div class="status-card-head">
+          <span class="status-dot"></span>
+          <span class="status-label">Absen Keluar</span>
+        </div>
+        <div class="status-value" id="status-keluar-time">Belum absen</div>
+        <div class="status-detail" id="status-keluar-addr"></div>
+      </div>
+    </div>
+
+    <div class="action-grid">
+      <button class="action-btn action-btn-in" id="btn-absen-masuk">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Absen Masuk</span>
+      </button>
+      <button class="action-btn action-btn-out" id="btn-absen-keluar">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Absen Keluar</span>
+      </button>
+    </div>
+
+    <button class="history-link" id="btn-history">
+      <span>Riwayat absensi</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- ===== SCREEN: CAMERA / CAPTURE ===== -->
+<div id="screen-camera" class="screen screen-dark">
+  <div class="camera-stage">
+    <video id="camera-video" autoplay playsinline muted></video>
+    <canvas id="camera-canvas" class="hidden"></canvas>
+
+    <div class="camera-overlay">
+      <div class="camera-top">
+        <button id="btn-camera-close" class="icon-btn icon-btn-light" aria-label="Batal">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </button>
+        <div class="camera-mode-chip" id="camera-mode-chip">ABSEN MASUK</div>
+        <div class="topbar-spacer"></div>
+      </div>
+
+      <div class="gps-panel" id="gps-panel">
+        <div class="gps-row">
+          <span class="gps-pulse" id="gps-pulse"></span>
+          <span class="gps-status-text" id="gps-status-text">Mencari sinyal GPS…</span>
+        </div>
+        <div class="gps-coords" id="gps-coords">—</div>
+        <div class="gps-address" id="gps-address">Menunggu lokasi akurat…</div>
+      </div>
+
+      <div class="frame-guide"></div>
+
+      <div class="camera-bottom">
+        <div class="camera-timestamp" id="camera-timestamp">—</div>
+        <button id="btn-shutter" class="shutter-btn" disabled>
+          <span class="shutter-ring"></span>
+          <span class="shutter-core"></span>
+        </button>
+        <div class="camera-hint" id="camera-hint">Menunggu GPS akurat</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCREEN: PREVIEW / CONFIRM ===== -->
+<div id="screen-preview" class="screen screen-dark">
+  <div class="preview-stage">
+    <img id="preview-image" class="preview-image" alt="Preview foto absen">
+    <div class="preview-info">
+      <div class="preview-info-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span id="preview-time">—</span>
+      </div>
+      <div class="preview-info-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-6.2-7-11.2A7 7 0 0119 9.8C19 15 12 21 12 21z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="9.8" r="2.4" stroke="currentColor" stroke-width="2"/></svg>
+        <span id="preview-address">—</span>
+      </div>
+      <div class="preview-info-row preview-accuracy">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+        <span id="preview-accuracy">—</span>
+      </div>
+    </div>
+  </div>
+  <div class="preview-actions">
+    <button id="btn-retake" class="btn-secondary">Ambil ulang</button>
+    <button id="btn-submit" class="btn-primary">
+      <span id="btn-submit-text">Kirim Absen</span>
+      <span id="btn-submit-spinner" class="spinner hidden"></span>
+    </button>
+  </div>
+</div>
+
+<!-- ===== SCREEN: SUCCESS ===== -->
+<div id="screen-success" class="screen">
+  <div class="success-body">
+    <div class="success-mark">
+      <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+        <circle cx="36" cy="36" r="34" stroke="#7FB069" stroke-width="3"/>
+        <path id="success-check" d="M22 37L31 46L50 26" stroke="#7FB069" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2 class="success-title" id="success-title">Absen berhasil dicatat</h2>
+    <p class="success-sub" id="success-sub">—</p>
+    <button id="btn-back-home" class="btn-primary btn-full">Kembali ke Beranda</button>
+  </div>
+</div>
+
+<!-- ===== SCREEN: HISTORY ===== -->
+<div id="screen-history" class="screen">
+  <header class="topbar">
+    <button id="btn-history-back" class="icon-btn" aria-label="Kembali">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="topbar-title topbar-title-center">
+      <span class="topbar-title-main">Riwayat</span>
+    </div>
+    <div class="topbar-spacer"></div>
+  </header>
+  <div class="history-body" id="history-list">
+    <!-- populated by app.js -->
+  </div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- ===== MODAL: ALERT/CONFIRM ===== -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-icon" id="modal-icon"></div>
+    <h3 class="modal-title" id="modal-title"></h3>
+    <p class="modal-message" id="modal-message"></p>
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
