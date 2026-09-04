@@ -18,6 +18,11 @@ const state = {
 
 const STORAGE_KEY = 'absen_employee';
 
+function isBackendConfigured() {
+  const url = (CONFIG.APPS_SCRIPT_URL || '').trim();
+  return url.length > 0 && !url.includes('GANTI_DENGAN_URL');
+}
+
 /* ============================================
    INIT
    ============================================ */
@@ -26,6 +31,8 @@ document.addEventListener('DOMContentLoaded', init);
 async function init() {
   registerServiceWorker();
   startClock();
+  attachEventListeners(); // HARUS selalu jalan, apa pun jalur login di bawah ini
+
   await loadEmployees();
 
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -40,7 +47,9 @@ async function init() {
     } catch (e) { /* ignore */ }
   }
   showScreen('screen-login');
+}
 
+function attachEventListeners() {
   document.getElementById('employee-search').addEventListener('input', onSearchInput);
   document.getElementById('btn-logout').addEventListener('click', onLogout);
   document.getElementById('btn-absen-masuk').addEventListener('click', () => openCamera('masuk'));
@@ -88,7 +97,7 @@ async function loadEmployees() {
   state.employees = fallback;
   renderEmployeeList(state.employees);
 
-  const backendConfigured = CONFIG.APPS_SCRIPT_URL && !CONFIG.APPS_SCRIPT_URL.includes('GANTI_DENGAN_URL');
+  const backendConfigured = isBackendConfigured();
   if (!backendConfigured) return; // tetap pakai fallback, tidak perlu fetch
 
   // Coba ambil data terbaru dari Sheets di background; kalau berhasil dan
@@ -171,7 +180,7 @@ function onLogout() {
    ============================================ */
 async function refreshTodayStatus() {
   if (!state.employee) return;
-  const backendConfigured = CONFIG.APPS_SCRIPT_URL && !CONFIG.APPS_SCRIPT_URL.includes('GANTI_DENGAN_URL');
+  const backendConfigured = isBackendConfigured();
   if (!backendConfigured) return; // belum ada backend, biarkan status default "Belum absen"
   try {
     const res = await fetch(`${CONFIG.APPS_SCRIPT_URL}?action=today&employeeId=${encodeURIComponent(state.employee.id)}`);
@@ -409,7 +418,7 @@ async function submitAttendance() {
   const btnText = document.getElementById('btn-submit-text');
   const spinner = document.getElementById('btn-submit-spinner');
 
-  const backendConfigured = CONFIG.APPS_SCRIPT_URL && !CONFIG.APPS_SCRIPT_URL.includes('GANTI_DENGAN_URL');
+  const backendConfigured = isBackendConfigured();
   if (!backendConfigured) {
     showModal({
       icon: 'warn',
@@ -480,7 +489,7 @@ async function openHistory() {
   showScreen('screen-history');
   const container = document.getElementById('history-list');
 
-  const backendConfigured = CONFIG.APPS_SCRIPT_URL && !CONFIG.APPS_SCRIPT_URL.includes('GANTI_DENGAN_URL');
+  const backendConfigured = isBackendConfigured();
   if (!backendConfigured) {
     container.innerHTML = '<div class="history-empty">Riwayat akan muncul di sini setelah backend Google Sheets terhubung (lihat README.md).</div>';
     return;
