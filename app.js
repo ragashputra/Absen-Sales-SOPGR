@@ -25,6 +25,47 @@ const state = {
 const STORAGE_KEY = 'absen_employee';
 const QUEUE_KEY = 'absen_pending_queue';
 const GEOCODE_CACHE_KEY = 'absen_geocode_cache';
+const THEME_KEY = 'absen_theme';
+
+/* ============================================
+   TEMA — light / dark / system
+   ------------------------------------------------
+   Preferensi disimpan di localStorage. Atribut data-theme
+   di <html> sudah di-set SEBELUM app.js jalan (lihat inline
+   script kecil di index.html) supaya tidak ada flash warna
+   salah sesaat sebelum app siap.
+   ============================================ */
+function getSystemPrefersDark() {
+  return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
+function applyTheme(choice) {
+  const isDark = choice === 'dark' || (choice === 'system' && getSystemPrefersDark());
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+
+  const metaTheme = document.getElementById('meta-theme-color');
+  if (metaTheme) metaTheme.setAttribute('content', isDark ? '#0A0B0D' : '#F7F5F1');
+
+  // Update indikator & label aktif di segmented control (kalau screen Profil sudah dirender)
+  const switchEl = document.getElementById('theme-switch');
+  if (switchEl) {
+    const opts = Array.from(switchEl.querySelectorAll('.theme-switch-opt'));
+    const activeIdx = opts.findIndex(o => o.dataset.themeChoice === choice);
+    opts.forEach((o, i) => o.classList.toggle('active', i === activeIdx));
+    const indicator = document.getElementById('theme-switch-indicator');
+    if (indicator && activeIdx >= 0) indicator.style.transform = `translateX(${activeIdx * 100}%)`;
+  }
+}
+
+function setTheme(choice) {
+  localStorage.setItem(THEME_KEY, choice);
+  applyTheme(choice);
+}
+
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY) || 'system';
+  applyTheme(saved);
+}
 
 function isBackendConfigured() {
   const url = (CONFIG.APPS_SCRIPT_URL || '').trim();
@@ -38,6 +79,7 @@ document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
   registerServiceWorker();
+  initTheme();
   startClock();
   attachEventListeners(); // HARUS selalu jalan, apa pun jalur login di bawah ini
   attachConnectivityListeners();
@@ -67,18 +109,24 @@ function attachEventListeners() {
   document.getElementById('btn-submit').addEventListener('click', submitAttendance);
   document.getElementById('btn-back-home').addEventListener('click', goToHome);
 
-  // Bottom nav — ada 2 salinan (di screen-home & screen-history) supaya nav
-  // selalu tampil di kedua layar; keduanya dihubungkan ke fungsi yang sama.
-  ['nav-home', 'nav-home-2'].forEach(id => {
+  // Bottom nav — ada 3 salinan (di screen-home, screen-history & screen-profile)
+  // supaya nav selalu tampil di setiap layar; semuanya terhubung ke fungsi yang sama.
+  ['nav-home', 'nav-home-2', 'nav-home-3'].forEach(id => {
     document.getElementById(id).addEventListener('click', goToHome);
   });
-  ['nav-history', 'nav-history-2'].forEach(id => {
+  ['nav-history', 'nav-history-2', 'nav-history-3'].forEach(id => {
     document.getElementById(id).addEventListener('click', () => {
       setBottomNavActive('history');
       openHistory();
     });
   });
-  ['btn-open-absen', 'btn-open-absen-2'].forEach(id => {
+  ['nav-profile', 'nav-profile-2', 'nav-profile-3'].forEach(id => {
+    document.getElementById(id).addEventListener('click', goToProfile);
+  });
+  ['nav-logout', 'nav-logout-2', 'nav-logout-3'].forEach(id => {
+    document.getElementById(id).addEventListener('click', onLogout);
+  });
+  ['btn-open-absen', 'btn-open-absen-2', 'btn-open-absen-3'].forEach(id => {
     document.getElementById(id).addEventListener('click', openAbsenSheet);
   });
 
@@ -95,6 +143,18 @@ function attachEventListeners() {
   document.getElementById('sheet-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'sheet-overlay') closeAbsenSheet();
   });
+
+  // Ganti tema — tiga pilihan: terang / gelap / ikuti sistem
+  document.querySelectorAll('.theme-switch-opt').forEach(btn => {
+    btn.addEventListener('click', () => setTheme(btn.dataset.themeChoice));
+  });
+
+  // Kalau user pilih "Sistem", tetap responsif kalau OS berganti tema saat app terbuka
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if ((localStorage.getItem(THEME_KEY) || 'system') === 'system') applyTheme('system');
+    });
+  }
 }
 
 function goToHome() {
@@ -102,6 +162,11 @@ function goToHome() {
   showScreen('screen-home');
   refreshTodayStatus();
   refreshRecentHistory();
+}
+
+function goToProfile() {
+  setBottomNavActive('profile');
+  showScreen('screen-profile');
 }
 
 /* ============================================
@@ -129,11 +194,29 @@ function closeAbsenSheet() {
 }
 
 function setBottomNavActive(target) {
-  // target: 'home' | 'history' — mengatur kedua salinan nav (di screen-home & screen-history) sekaligus
-  document.querySelectorAll('.nav-item').forEach(el => {
-    const isHome = el.id === 'nav-home' || el.id === 'nav-home-2';
-    const isHistory = el.id === 'nav-history' || el.id === 'nav-history-2';
-    el.classList.toggle('active', (target === 'home' && isHome) || (target === 'history' && isHistory));
+  // target: 'home' | 'history' | 'profile' — mengatur SEMUA salinan nav
+  // (muncul di screen-home, screen-history, screen-profile) sekaligus,
+  // termasuk menggeser indicator pill aktif ke posisi tab yang benar.
+  // Catatan: "Keluar" BUKAN target navigasi (dia cuma tombol aksi/modal),
+  // jadi tidak pernah ikut dihitung di sini — indicator tidak akan pernah
+  // nyasar ke slot Keluar.
+  const indexByTarget = { home: 0, profile: 1, history: 3 };
+  const activeIndex = indexByTarget[target] ?? 0;
+
+  document.querySelectorAll('.nav-item:not(.nav-item-logout)').forEach(el => {
+    const isHome = el.id.startsWith('nav-home');
+    const isHistory = el.id.startsWith('nav-history');
+    const isProfile = el.id.startsWith('nav-profile');
+    el.classList.toggle('active',
+      (target === 'home' && isHome) ||
+      (target === 'history' && isHistory) ||
+      (target === 'profile' && isProfile)
+    );
+  });
+
+  // Setiap layar punya nav-indicator sendiri (satu per bottom-nav), geser semuanya
+  document.querySelectorAll('.nav-indicator').forEach(el => {
+    el.style.transform = `translateX(${activeIndex * 100}%)`;
   });
 }
 
@@ -250,6 +333,9 @@ function selectEmployee(emp) {
   document.getElementById('home-employee-name').textContent = emp.name;
   document.getElementById('home-employee-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
   document.getElementById('home-employee-avatar').textContent = initials(emp.name);
+  document.getElementById('profile-name').textContent = emp.name;
+  document.getElementById('profile-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
+  document.getElementById('profile-avatar').textContent = initials(emp.name);
   setBottomNavActive('home');
   showScreen('screen-home');
   refreshTodayStatus();
