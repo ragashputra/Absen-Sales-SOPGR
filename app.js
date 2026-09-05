@@ -521,6 +521,8 @@ function resetGpsPanel() {
   document.getElementById('gps-panel').classList.remove('accurate');
   document.getElementById('btn-shutter').disabled = true;
   document.getElementById('camera-hint').textContent = 'Menunggu GPS akurat';
+  const frameGuideReset = document.getElementById('frame-guide');
+  if (frameGuideReset) frameGuideReset.classList.remove('ready');
 
   // Kalau setelah GPS_MAX_WAIT akurasi belum ideal, tetap izinkan foto
   // (lebih baik absen dengan akurasi menengah daripada karyawan stuck tak bisa absen
@@ -578,8 +580,13 @@ function onGpsUpdate(position) {
   const shutterBtn = document.getElementById('btn-shutter');
   const hint = document.getElementById('camera-hint');
   const panel = document.getElementById('gps-panel');
+  const frameGuide = document.getElementById('frame-guide');
 
   panel.classList.toggle('accurate', isGreat);
+  // Oval guide "lock-on" (hijau, tegas, berhenti bernapas) begitu GPS sudah
+  // cukup akurat untuk absen — kasih sinyal visual jelas kayak face-scan di
+  // aplikasi HR attendance profesional bahwa app sudah "siap" ambil foto.
+  if (frameGuide) frameGuide.classList.toggle('ready', isAccurate);
 
   if (isAccurate) {
     pulse.classList.add('locked');

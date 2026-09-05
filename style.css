@@ -553,9 +553,8 @@ input { font-family: inherit; }
      margin auto di flex container vertikal, jadi tetap center tanpa
      numpang ke flex-grow yang dipengaruhi konten sekitarnya. */
   flex: none; margin: 20px auto;
-  border: 1.5px dashed rgba(232,206,148,0.32);
-  border-radius: 50% / 42%;
   width: 68%; max-width: 260px; height: 34vh; max-height: 320px; min-height: 200px;
+  display: flex; align-items: center; justify-content: center;
   /* Delay kecil (0.08s) supaya animasi masuk guide mulai SETELAH transisi
      transform/scale screen (0.22s) sudah cukup jalan — mencegah dua animasi
      numpuk bersamaan yang kelihatan "patah"/tersendat saat kamera baru
@@ -567,6 +566,86 @@ input { font-family: inherit; }
 @keyframes frame-guide-in {
   to { opacity: 1; transform: scale(1); }
 }
+
+/* ---- Face guide SVG: oval halus + 4 corner bracket ala face-scan
+   di aplikasi HR attendance profesional (mis. GreytHR/Talenta/kiosk absensi).
+   Warna, ketebalan garis, dan animasi berubah mengikuti status siap-tidaknya
+   (GPS akurat), lewat class .ready yang di-toggle dari JS. ---- */
+.frame-guide-svg { width: 100%; height: 100%; overflow: visible; }
+
+.fg-oval {
+  fill: none;
+  stroke: var(--fg-oval-color, rgba(232,206,148,0.7));
+  stroke-width: 2.25;
+  stroke-dasharray: 7 8;
+  stroke-linecap: round;
+  transition: stroke 0.4s ease, stroke-width 0.4s ease, filter 0.4s ease,
+    stroke-dasharray 0.4s ease, stroke-dashoffset 0.05s linear;
+  filter: drop-shadow(0 0 7px var(--fg-oval-glow, rgba(232,206,148,0.28)));
+  animation: fg-oval-march 1.1s linear infinite;
+}
+/* Garis putus-putus "berjalan" pelan mengelilingi oval — bukan sekadar
+   napas diam di tempat, tapi kesan aktif "sedang memindai" seperti
+   face-scan kiosk absensi profesional. */
+@keyframes fg-oval-march {
+  to { stroke-dashoffset: -30; }
+}
+
+.fg-corner {
+  fill: none;
+  stroke: var(--fg-corner-color, rgba(255,255,255,0.96));
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke 0.4s ease, filter 0.4s ease;
+  filter: drop-shadow(0 0 6px rgba(0,0,0,0.4));
+  animation: fg-corner-pulse 2.4s ease-in-out infinite;
+}
+/* Bracket sudut berdenyut halus, menandakan app aktif "mencari" posisi wajah
+   sebelum kondisi siap tercapai. */
+@keyframes fg-corner-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Garis scan horizontal tipis yang menyapu naik-turun dalam oval — detail
+   kecil yang bikin kesan "sistem sedang bekerja" jauh lebih meyakinkan
+   daripada garis statis, persis pola yang dipakai app face-verification
+   profesional. Berhenti otomatis begitu status .ready (lock-on) tercapai. */
+.fg-scanline {
+  stroke: var(--fg-oval-color, rgba(232,206,148,0.7));
+  stroke-width: 1.5;
+  opacity: 0.55;
+  filter: drop-shadow(0 0 4px var(--fg-oval-glow, rgba(232,206,148,0.3)));
+  animation: fg-scan-sweep 2.6s ease-in-out infinite;
+  transition: stroke 0.4s ease, opacity 0.3s ease;
+}
+@keyframes fg-scan-sweep {
+  0% { transform: translateY(-90px); opacity: 0; }
+  12% { opacity: 0.6; }
+  50% { transform: translateY(90px); opacity: 0.6; }
+  88% { opacity: 0.6; }
+  100% { transform: translateY(-90px); opacity: 0; }
+}
+
+/* Status siap: GPS sudah cukup akurat untuk absen -> aksen hijau sage solid,
+   oval berhenti berjalan & jadi garis tegas (lock-on), bracket berhenti
+   berdenyut, scanline hilang. Kesan tegas "terverifikasi, silakan foto". */
+.frame-guide.ready {
+  --fg-oval-color: rgba(122,163,110,0.95);
+  --fg-oval-glow: rgba(122,163,110,0.5);
+  --fg-corner-color: var(--sage-500, #7A9A6E);
+}
+.frame-guide.ready .fg-oval {
+  animation: none;
+  stroke-dasharray: none;
+  stroke-width: 2.75;
+}
+.frame-guide.ready .fg-corner {
+  animation: none;
+  opacity: 1;
+  filter: drop-shadow(0 0 9px rgba(122,163,110,0.55));
+}
+.frame-guide.ready .fg-scanline { opacity: 0; animation: none; }
 
 .camera-bottom { display: flex; flex-direction: column; align-items: center; gap: 13px; margin-top: auto; }
 .camera-timestamp {
