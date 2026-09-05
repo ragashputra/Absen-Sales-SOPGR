@@ -202,33 +202,10 @@
         <div class="gps-address" id="gps-address">Menunggu lokasi akurat…</div>
       </div>
 
-      <div class="frame-guide" id="frame-guide">
-        <svg viewBox="0 0 240 300" xmlns="http://www.w3.org/2000/svg" class="frame-guide-svg" preserveAspectRatio="xMidYMid meet">
-          <defs>
-            <!-- Clip supaya garis scan tidak pernah bocor keluar bentuk oval -->
-            <clipPath id="fg-oval-clip">
-              <ellipse cx="120" cy="150" rx="106" ry="134"/>
-            </clipPath>
-          </defs>
-          <!-- Oval pemandu wajah: garis putus-putus tegas + halo, "berjalan" pelan
-               mengelilingi oval untuk kesan sistem sedang aktif memindai.
-               rx/ry diperbesar & dirapatkan ke tepi viewBox supaya oval memenuhi
-               sebagian besar frame — merepresentasikan jarak selfie wajar
-               (lengan tangan normal), bukan jarak jauh yang bikin user harus
-               merentangkan tangan sejauh mungkin. -->
-          <ellipse class="fg-oval" cx="120" cy="150" rx="108" ry="136"/>
-          <!-- Garis scan horizontal yang menyapu naik-turun di dalam oval -->
-          <g clip-path="url(#fg-oval-clip)">
-            <line class="fg-scanline" x1="14" y1="150" x2="226" y2="150"/>
-          </g>
-          <!-- 4 corner bracket ala face-scan HR app profesional -->
-          <path class="fg-corner" d="M4 42 V12 A8 8 0 0 1 12 4 H42"/>
-          <path class="fg-corner" d="M198 4 H228 A8 8 0 0 1 236 12 V42"/>
-          <path class="fg-corner" d="M236 258 V288 A8 8 0 0 1 228 296 H198"/>
-          <path class="fg-corner" d="M42 296 H12 A8 8 0 0 1 4 288 V258"/>
-        </svg>
+      <div class="camera-distance-tip hidden" id="camera-distance-tip">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 16.5h.01" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="2"/></svg>
+        <span id="camera-distance-text">Terlalu jauh — dekatkan wajah ke kamera</span>
       </div>
-      <div class="frame-guide-tip" id="frame-guide-tip">Posisikan wajah di dalam bingkai, pegang HP di depan wajah</div>
 
       <div class="camera-bottom">
         <div class="camera-timestamp" id="camera-timestamp">—</div>

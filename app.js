@@ -15,6 +15,11 @@ const state = {
   gpsBestAccuracySeen: Infinity,
   geocodeInFlightKey: null,
   stream: null,
+  faceDetector: null,        // instance FaceDetector (kalau browser mendukung)
+  faceDistanceActive: false, // apakah loop peringatan jarak wajah sedang jalan
+  faceDistanceTimer: null,
+  faceTooFarStreak: 0,
+  faceOkStreak: 0,
   capturedPhoto: null,   // base64 dataURL (compressed)
   captureTime: null,
   todayStatus: { masuk: null, keluar: null },
@@ -490,7 +495,9 @@ function startCameraStream() {
     audio: false
   }).then(stream => {
     state.stream = stream;
-    document.getElementById('camera-video').srcObject = stream;
+    const video = document.getElementById('camera-video');
+    video.srcObject = stream;
+    startFaceDistanceWatch(video);
   }).catch(() => {
     showModal({
       icon: 'error',
@@ -499,6 +506,89 @@ function startCameraStream() {
       actions: [{ label: 'Kembali', style: 'solid', onClick: closeCamera }]
     });
   });
+}
+
+/* ============================================
+   PERINGATAN JARAK WAJAH (opsional, non-blocking)
+   ------------------------------------------------
+   Tidak ada bingkai/oval yang membatasi komposisi foto — user bebas selfie
+   senormal kamera bawaan. Yang dibatasi HANYA jarak wajah supaya tidak
+   terlalu jauh dari kamera (foto absen jadi terlalu kecil/kurang jelas
+   untuk verifikasi). Dipakai FaceDetector API bawaan browser (Chrome
+   Android) kalau tersedia; kalau tidak, fitur ini diam-diam nonaktif sama
+   sekali — TIDAK PERNAH memblokir shutter, cuma peringatan visual halus.
+   ============================================ */
+function startFaceDistanceWatch(video) {
+  stopFaceDistanceWatch(); // pastikan tidak ada loop lama nyangkut
+
+  if (typeof FaceDetector === 'undefined') return; // browser tidak dukung, skip total
+
+  let detector;
+  try {
+    detector = new FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+  } catch (e) {
+    return; // gagal inisialisasi (mis. permission/flag khusus), skip diam-diam
+  }
+
+  state.faceDetector = detector;
+  state.faceDistanceActive = true;
+  state.faceTooFarStreak = 0;
+  state.faceOkStreak = 0;
+
+  // Throttle deteksi tiap ~450ms — cukup responsif tapi ringan di CPU,
+  // tidak mengganggu kelancaran preview video sama sekali.
+  const DETECT_INTERVAL_MS = 450;
+  // Ambang: wajah dianggap "terlalu jauh" kalau tinggi bounding-box wajah
+  // kurang dari ~22% tinggi frame video — nilai ini dikalibrasi longgar
+  // supaya TIDAK mudah false-positive selama masih dalam jarak selfie wajar.
+  const FACE_TOO_FAR_RATIO = 0.22;
+  // Butuh beberapa deteksi berturut-turut sebelum toggle tampilan, supaya
+  // tip tidak "kedip-kedip" tiap frame gara-gara noise deteksi.
+  const STREAK_TO_TOGGLE = 2;
+
+  async function tick() {
+    if (!state.faceDistanceActive) return;
+    try {
+      if (video.readyState >= 2 && video.videoHeight > 0) {
+        const faces = await detector.detect(video);
+        if (faces && faces.length > 0) {
+          const box = faces[0].boundingBox;
+          const ratio = box.height / video.videoHeight;
+          if (ratio < FACE_TOO_FAR_RATIO) {
+            state.faceTooFarStreak++;
+            state.faceOkStreak = 0;
+          } else {
+            state.faceOkStreak++;
+            state.faceTooFarStreak = 0;
+          }
+          if (state.faceTooFarStreak >= STREAK_TO_TOGGLE) setDistanceTipVisible(true);
+          else if (state.faceOkStreak >= STREAK_TO_TOGGLE) setDistanceTipVisible(false);
+        } else {
+          // Tidak ada wajah kedetek sama sekali (mis. HP belum diarahkan ke
+          // wajah) — jangan tampilkan peringatan "terlalu jauh" yang keliru,
+          // cukup sembunyikan dan tunggu deteksi berikutnya.
+          setDistanceTipVisible(false);
+        }
+      }
+    } catch (e) {
+      // Deteksi gagal di frame ini (jarang, biasanya sesaat) — abaikan dan
+      // coba lagi di tick berikutnya, jangan hentikan loop atau ganggu user.
+    }
+    state.faceDistanceTimer = setTimeout(tick, DETECT_INTERVAL_MS);
+  }
+  tick();
+}
+
+function setDistanceTipVisible(visible) {
+  const tip = document.getElementById('camera-distance-tip');
+  if (tip) tip.classList.toggle('hidden', !visible);
+}
+
+function stopFaceDistanceWatch() {
+  state.faceDistanceActive = false;
+  clearTimeout(state.faceDistanceTimer);
+  state.faceDistanceTimer = null;
+  setDistanceTipVisible(false);
 }
 
 function updateCameraTimestamp() {
@@ -521,8 +611,6 @@ function resetGpsPanel() {
   document.getElementById('gps-panel').classList.remove('accurate');
   document.getElementById('btn-shutter').disabled = true;
   document.getElementById('camera-hint').textContent = 'Menunggu GPS akurat';
-  const frameGuideReset = document.getElementById('frame-guide');
-  if (frameGuideReset) frameGuideReset.classList.remove('ready');
 
   // Kalau setelah GPS_MAX_WAIT akurasi belum ideal, tetap izinkan foto
   // (lebih baik absen dengan akurasi menengah daripada karyawan stuck tak bisa absen
@@ -580,13 +668,8 @@ function onGpsUpdate(position) {
   const shutterBtn = document.getElementById('btn-shutter');
   const hint = document.getElementById('camera-hint');
   const panel = document.getElementById('gps-panel');
-  const frameGuide = document.getElementById('frame-guide');
 
   panel.classList.toggle('accurate', isGreat);
-  // Oval guide "lock-on" (hijau, tegas, berhenti bernapas) begitu GPS sudah
-  // cukup akurat untuk absen — kasih sinyal visual jelas kayak face-scan di
-  // aplikasi HR attendance profesional bahwa app sudah "siap" ambil foto.
-  if (frameGuide) frameGuide.classList.toggle('ready', isAccurate);
 
   if (isAccurate) {
     pulse.classList.add('locked');
@@ -777,6 +860,7 @@ function closeCamera() {
 }
 
 function stopCameraStream() {
+  stopFaceDistanceWatch();
   if (state.stream) {
     state.stream.getTracks().forEach(t => t.stop());
     state.stream = null;
