@@ -425,22 +425,28 @@ input { font-family: inherit; }
   animation: fab-glow-pulse 2.6s ease-in-out infinite;
 }
 .nav-fab svg { position: relative; z-index: 2; width: 30px; height: 30px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15)); }
-/* Cincin cahaya berdenyut halus di belakang FAB — kesan "kamera menyala",
-   dibuat dari box-shadow terpisah supaya tidak ikut ter-scale saat :active. */
+/* Cincin cahaya berdenyut halus di belakang FAB — kesan "kamera menyala".
+   Warnanya dibedakan per tema supaya kontrasnya selalu kuat: di light mode
+   brass pucat nyaris tak kelihatan di atas background terang, jadi dipakai
+   warna brass yang jauh lebih gelap & pekat; di dark mode dipakai brass
+   terang supaya menyala jelas di atas background gelap. */
 .nav-fab::before {
   content: '';
   position: absolute; inset: -6px; border-radius: 50%;
-  border: 1.5px solid rgba(191,151,82,0.45);
+  border: 2px solid var(--fab-ring-color, rgba(156,122,62,0.85));
   animation: fab-ring-pulse 2.6s ease-in-out infinite;
   pointer-events: none;
 }
+:root { --fab-ring-color: rgba(156,122,62,0.85); }
+[data-theme="dark"] { --fab-ring-color: rgba(232,206,148,0.75); }
 @keyframes fab-glow-pulse {
   0%, 100% { box-shadow: 0 10px 26px -6px rgba(191,151,82,0.65), 0 0 0 5px var(--bg), inset 0 1px 0 rgba(255,255,255,0.4); }
   50% { box-shadow: 0 10px 30px -4px rgba(191,151,82,0.95), 0 0 0 5px var(--bg), inset 0 1px 0 rgba(255,255,255,0.4); }
 }
 @keyframes fab-ring-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.7; }
-  50% { transform: scale(1.18); opacity: 0; }
+  0% { transform: scale(1); opacity: 0.9; }
+  70% { transform: scale(1.22); opacity: 0; }
+  100% { transform: scale(1.22); opacity: 0; }
 }
 .nav-fab:active { transform: translateY(-8px) scale(0.9); }
 @media (prefers-reduced-motion: reduce) {

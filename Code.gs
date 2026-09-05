@@ -21,6 +21,13 @@
  * - LockService mencegah dua absen nyaris bersamaan saling tabrak/duplikat.
  * - Cache karyawan (6 menit) di CacheService supaya endpoint "employees" tidak
  *   selalu baca ulang seluruh sheet Karyawan.
+ * - Cache LOG per-karyawan (2 menit) di CacheService: sheet Log cuma dibaca
+ *   sekali dari Google Sheets, lalu dipakai ulang utk "today" & "history" —
+ *   otomatis dihapus tiap ada absen baru supaya datanya tidak pernah basi.
+ * - Endpoint gabungan "home" (today + riwayat ringkas 7 hari sekaligus dalam
+ *   SATU request) supaya HP karyawan tidak perlu 2x round-trip network saat
+ *   buka halaman Home — ini yang paling kerasa bikin app kerasa jauh lebih
+ *   responsif dibanding versi sebelumnya.
  * - Validasi payload lebih ketat sebelum proses foto (gagal cepat, tidak buang
  *   waktu upload ke Drive kalau data jelas tidak lengkap).
  * - Semua error dibungkus rapi jadi respons JSON yang konsisten, supaya app
@@ -32,6 +39,7 @@ const SHEET_LOG = 'Log';
 const FOLDER_NAME = 'Absensi - Foto Selfie'; // folder Drive otomatis dibuat di My Drive
 const TZ = 'Asia/Jakarta';
 const EMPLOYEE_CACHE_SECONDS = 360;
+const LOG_CACHE_SECONDS = 120; // 2 menit — cukup singkat agar tetap akurat, cukup lama utk hindari baca sheet berulang
 
 function doGet(e) {
   const action = e.parameter.action;
@@ -39,6 +47,17 @@ function doGet(e) {
     if (action === 'employees') return jsonOut({ employees: getEmployeesCached() });
     if (action === 'today') return jsonOut(getTodayStatus(e.parameter.employeeId));
     if (action === 'history') return jsonOut({ history: getHistory(e.parameter.employeeId, Number(e.parameter.limit) || 50) });
+    // "home": gabungan today + history dalam SATU response, cukup 1x baca sheet
+    // (lewat cache log bersama) — dipakai layar Home biar cuma 1x round-trip.
+    if (action === 'home') {
+      const employeeId = e.parameter.employeeId;
+      const rows = getEmployeeLogRowsCached(employeeId);
+      const limit = Number(e.parameter.limit) || 50;
+      return jsonOut({
+        today: computeTodayStatus(rows),
+        history: rows.slice(0, limit)
+      });
+    }
     return jsonOut({ error: 'Unknown action' });
   } catch (err) {
     return jsonOut({ error: String(err) });
@@ -191,6 +210,10 @@ function recordAttendance(payload) {
       mapsLink
     ]);
 
+    // Hapus cache Log milik karyawan ini supaya request "today"/"history"/"home"
+    // BERIKUTNYA langsung baca data terbaru dari sheet, bukan data basi 2 menit lalu.
+    invalidateLogCache(employeeId);
+
     return {
       ok: true,
       data: {
@@ -217,28 +240,18 @@ function getOrCreateFolder() {
    TODAY STATUS
    ============================================ */
 function getTodayStatus(employeeId) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
-  if (!sheet) return { masuk: null, keluar: null };
+  return computeTodayStatus(getEmployeeLogRowsCached(employeeId));
+}
 
+function computeTodayStatus(rows) {
   const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return { masuk: null, keluar: null };
-
-  const rows = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
   const result = { masuk: null, keluar: null };
-
-  // Scan dari bawah (data terbaru) supaya kalau ada duplikat lama, yang dipakai
-  // tetap entri paling akhir/terbaru.
-  for (let i = rows.length - 1; i >= 0; i--) {
-    const [id, name, tipe, tanggalRaw, jamRaw, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
-    const tanggal = normalizeDate(tanggalRaw);
-    const jam = normalizeTime(jamRaw);
-    if (String(id) !== String(employeeId)) continue;
-    if (tanggal !== today) continue;
-
-    const entry = { time: jam, address: alamat, photoUrl: fotoUrl, mapsLink };
-    if (tipe === 'Masuk' && !result.masuk) result.masuk = entry;
-    if (tipe === 'Keluar' && !result.keluar) result.keluar = entry;
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (row.date !== today) continue;
+    const entry = { time: row.time, address: row.address, photoUrl: row.photoUrl, mapsLink: row.mapsLink };
+    if (row.type === 'Masuk' && !result.masuk) result.masuk = entry;
+    if (row.type === 'Keluar' && !result.keluar) result.keluar = entry;
     if (result.masuk && result.keluar) break;
   }
   return result;
@@ -248,6 +261,43 @@ function getTodayStatus(employeeId) {
    HISTORY
    ============================================ */
 function getHistory(employeeId, limit) {
+  return getEmployeeLogRowsCached(employeeId).slice(0, limit);
+}
+
+/* ============================================
+   LOG CACHE (per-karyawan)
+   ------------------------------------------------
+   Kenapa perlu ini: endpoint "today", "history", dan "home" semuanya butuh
+   baca baris Log milik karyawan yang sama, dan dipanggil BERKALI-KALI dalam
+   waktu singkat (tiap buka Home, tiap buka Riwayat, tiap refresh). Tanpa
+   cache, setiap panggilan baca ULANG seluruh sheet Log dari awal — ini bagian
+   paling lambat di seluruh alur, apalagi kalau sheet Log sudah berisi ribuan
+   baris. Dengan cache 2 menit per-karyawan, baca sheet cuma terjadi sekali
+   per 2 menit per orang, sisanya diambil instan dari memori CacheService.
+   Cache otomatis dihapus (lihat invalidateLogCache) begitu ada absen baru
+   supaya data yang ditampilkan tidak pernah basi/telat.
+   ============================================ */
+function getEmployeeLogRowsCached(employeeId) {
+  const cache = CacheService.getScriptCache();
+  const key = 'log_rows_v1_' + String(employeeId);
+  const cached = cache.get(key);
+  if (cached) return JSON.parse(cached);
+
+  const rows = readEmployeeLogRows(employeeId);
+  try {
+    cache.put(key, JSON.stringify(rows), LOG_CACHE_SECONDS);
+  } catch (e) { /* payload terlalu besar utk cache, abaikan */ }
+  return rows;
+}
+
+function invalidateLogCache(employeeId) {
+  try { CacheService.getScriptCache().remove('log_rows_v1_' + String(employeeId)); } catch (e) { /* abaikan */ }
+}
+
+// Baca SATU KALI seluruh baris Log milik satu karyawan, sudah terurut dari
+// yang PALING BARU ke paling lama, sudah dinormalisasi tanggal/jamnya.
+// Inilah satu-satunya tempat yang benar-benar menyentuh Sheets untuk data Log.
+function readEmployeeLogRows(employeeId) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
   if (!sheet) return [];
 
@@ -256,7 +306,6 @@ function getHistory(employeeId, limit) {
 
   const rows = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
   const out = [];
-
   for (let i = rows.length - 1; i >= 0; i--) {
     const [id, name, tipe, tanggalRaw, jamRaw, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
     if (String(id) !== String(employeeId)) continue;
@@ -268,7 +317,6 @@ function getHistory(employeeId, limit) {
       photoUrl: fotoUrl,
       mapsLink: mapsLink
     });
-    if (out.length >= limit) break;
   }
   return out;
 }

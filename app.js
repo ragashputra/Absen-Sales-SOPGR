@@ -26,6 +26,31 @@ const STORAGE_KEY = 'absen_employee';
 const QUEUE_KEY = 'absen_pending_queue';
 const GEOCODE_CACHE_KEY = 'absen_geocode_cache';
 const THEME_KEY = 'absen_theme';
+const HOME_CACHE_PREFIX = 'absen_home_cache_';
+const HISTORY_CACHE_PREFIX = 'absen_history_cache_';
+
+/* ============================================
+   CACHE LOKAL (stale-while-revalidate)
+   ------------------------------------------------
+   Kenapa perlu ini: tanpa cache, tiap buka Home/Riwayat HARUS nunggu round-trip
+   ke Apps Script dulu sebelum ada apa-apa yang tampil — kerasa "lama kali
+   muncul" walau internetnya bagus, apalagi Apps Script sendiri punya cold-start.
+   Solusinya pola stale-while-revalidate: data terakhir yang berhasil diambil
+   disimpan di localStorage dan langsung dirender SEKETIKA saat layar dibuka
+   (tanpa nunggu network sama sekali), lalu di baliknya app tetap fetch data
+   terbaru dan diam-diam update begitu selesai. Hasilnya: layar Home/Riwayat
+   SELALU langsung keisi begitu dibuka (kalau pernah dibuka sebelumnya),
+   dan tetap selalu sinkron dengan data server dalam hitungan detik.
+   ============================================ */
+function readLocalCache(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+function writeLocalCache(key, data) {
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch (e) { /* storage penuh/disabled, abaikan */ }
+}
 
 /* ============================================
    TEMA — light / dark / system
@@ -160,8 +185,7 @@ function attachEventListeners() {
 function goToHome() {
   setBottomNavActive('home');
   showScreen('screen-home');
-  refreshTodayStatus();
-  refreshRecentHistory();
+  refreshHome();
 }
 
 function goToProfile() {
@@ -338,8 +362,7 @@ function selectEmployee(emp) {
   document.getElementById('profile-avatar').textContent = initials(emp.name);
   setBottomNavActive('home');
   showScreen('screen-home');
-  refreshTodayStatus();
-  refreshRecentHistory();
+  refreshHome();
   flushPendingQueue();
 }
 
@@ -360,22 +383,48 @@ function onLogout() {
 }
 
 /* ============================================
-   TODAY STATUS
+   HOME (status hari ini + riwayat ringkas) — SATU fetch gabungan + cache instan
    ============================================ */
-async function refreshTodayStatus() {
+function homeCacheKey() {
+  return HOME_CACHE_PREFIX + (state.employee ? state.employee.id : 'anon');
+}
+
+// Render SEKETIKA dari cache lokal (kalau ada) — tanpa nunggu network sama
+// sekali — supaya Home tidak pernah kelihatan kosong/loading lama saat dibuka.
+function paintHomeFromCache() {
+  const cached = readLocalCache(homeCacheKey());
+  if (!cached) return false;
+  state.todayStatus = cached.today || { masuk: null, keluar: null };
+  renderTodayStatus(state.todayStatus);
+  renderRecentHistory(cached.history || []);
+  return true;
+}
+
+async function refreshHome() {
   if (!state.employee) return;
   const backendConfigured = isBackendConfigured();
-  if (!backendConfigured) return; // belum ada backend, biarkan status default "Belum absen"
+  if (!backendConfigured) {
+    const container = document.getElementById('recent-history');
+    if (container) container.innerHTML = '<div class="recent-history-empty">Riwayat akan muncul setelah backend Google Sheets terhubung.</div>';
+    return; // belum ada backend, biarkan status default "Belum absen"
+  }
 
-  setStatusLoading(true);
+  const hadCache = paintHomeFromCache();
+  // Skeleton shimmer cuma ditampilkan kalau BENAR-BENAR belum ada data apa pun
+  // di layar (pertama kali buka, belum pernah ke-cache) — kalau sudah ada data
+  // lama dari cache, refresh terjadi diam-diam di belakang layar tanpa kedip.
+  if (!hadCache) setStatusLoading(true);
+
   try {
     const data = await fetchJsonWithTimeout(
-      `${CONFIG.APPS_SCRIPT_URL}?action=today&employeeId=${encodeURIComponent(state.employee.id)}`,
+      `${CONFIG.APPS_SCRIPT_URL}?action=home&employeeId=${encodeURIComponent(state.employee.id)}&limit=50`,
       {}, 10000
     );
-    state.todayStatus = data;
-    renderTodayStatus(data);
-  } catch (e) { /* offline, keep last known */ } finally {
+    state.todayStatus = data.today || { masuk: null, keluar: null };
+    renderTodayStatus(state.todayStatus);
+    renderRecentHistory(data.history || []);
+    writeLocalCache(homeCacheKey(), { today: state.todayStatus, history: data.history || [] });
+  } catch (e) { /* offline, biarkan data cache/terakhir yang tetap tampil */ } finally {
     setStatusLoading(false);
   }
 }
@@ -936,8 +985,7 @@ async function flushPendingQueue() {
   if (sentCount > 0) {
     showToast(`${sentCount} absensi tertunda berhasil dikirim.`);
     if (document.getElementById('screen-home').classList.contains('active')) {
-      refreshTodayStatus();
-      refreshRecentHistory();
+      refreshHome();
     }
   }
 }
@@ -963,27 +1011,6 @@ function showSuccess(data) {
 /* ============================================
    RIWAYAT RINGKAS DI HOME (7 hari terakhir)
    ============================================ */
-async function refreshRecentHistory() {
-  const container = document.getElementById('recent-history');
-  if (!container || !state.employee) return;
-
-  const backendConfigured = isBackendConfigured();
-  if (!backendConfigured) {
-    container.innerHTML = '<div class="recent-history-empty">Riwayat akan muncul setelah backend Google Sheets terhubung.</div>';
-    return;
-  }
-
-  try {
-    const data = await fetchJsonWithTimeout(
-      `${CONFIG.APPS_SCRIPT_URL}?action=history&employeeId=${encodeURIComponent(state.employee.id)}&limit=50`,
-      {}, 10000
-    );
-    renderRecentHistory(data.history || []);
-  } catch (e) {
-    container.innerHTML = '<div class="recent-history-empty">Gagal memuat riwayat. Periksa koneksi internet.</div>';
-  }
-}
-
 function renderRecentHistory(list) {
   const container = document.getElementById('recent-history');
 
@@ -1078,6 +1105,10 @@ function parseDateSafe(dateStr) {
 /* ============================================
    HISTORY (halaman penuh, dibuka dari bottom nav)
    ============================================ */
+function historyCacheKey() {
+  return HISTORY_CACHE_PREFIX + (state.employee ? state.employee.id : 'anon');
+}
+
 async function openHistory() {
   showScreen('screen-history');
   const container = document.getElementById('history-list');
@@ -1088,7 +1119,15 @@ async function openHistory() {
     return;
   }
 
-  container.innerHTML = renderHistorySkeleton();
+  // Tampilkan cache lokal SEKETIKA kalau ada (halaman ini pernah dibuka
+  // sebelumnya) — jauh lebih responsif daripada nunggu skeleton lalu network.
+  // Skeleton shimmer cuma dipakai kalau memang belum pernah ada data sama sekali.
+  const cachedList = readLocalCache(historyCacheKey());
+  if (cachedList && cachedList.length) {
+    renderHistory(cachedList);
+  } else {
+    container.innerHTML = renderHistorySkeleton();
+  }
 
   try {
     const data = await fetchJsonWithTimeout(
@@ -1096,8 +1135,15 @@ async function openHistory() {
       {}, 12000
     );
     renderHistory(data.history || []);
+    writeLocalCache(historyCacheKey(), data.history || []);
   } catch (e) {
-    container.innerHTML = '<div class="history-empty">Gagal memuat riwayat. Periksa koneksi internet.</div>';
+    // Kalau sudah ada data cache yang tampil, biarkan tetap tampil (lebih
+    // berguna daripada diganti pesan error) — cukup diam-diam gagal di
+    // belakang layar. Pesan error cuma ditunjukkan kalau memang belum ada
+    // data apa pun yang bisa ditampilkan sama sekali.
+    if (!cachedList || !cachedList.length) {
+      container.innerHTML = '<div class="history-empty">Gagal memuat riwayat. Periksa koneksi internet.</div>';
+    }
   }
 }
 
