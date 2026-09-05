@@ -317,7 +317,8 @@ input { font-family: inherit; }
 .recent-history-empty { text-align: center; color: var(--text-tertiary); font-size: 13px; padding: 30px 20px; }
 .recent-history-loading .recent-day-group { position: relative; overflow: hidden; }
 
-/* ============ BOTTOM NAV — premium glass tab bar (5 slot: Home, Profil, [Absen], Riwayat, Keluar) ============ */
+/* ============ BOTTOM NAV — premium glass tab bar dengan "pop-up notch"
+   (item aktif naik jadi lingkaran terangkat + lekukan di bar, ala referensi) ============ */
 .bottom-nav {
   position: absolute; left: 14px; right: 14px; bottom: calc(var(--safe-bottom) + 14px);
   display: flex; align-items: center;
@@ -329,54 +330,122 @@ input { font-family: inherit; }
   border-radius: 26px;
   flex-shrink: 0;
   box-shadow: 0 12px 32px -12px rgba(0,0,0,0.22), 0 1px 0 rgba(255,255,255,0.05) inset;
+  overflow: visible; /* supaya lingkaran pop-up boleh nongol keluar dari batas atas bar */
 }
+
+/* Lekukan (notch) di badan bar, tepat di belakang lingkaran yang nongol.
+   Dibuat dari radial-gradient "dent" yang meniru bayangan cekungan halus —
+   pendekatan ini jauh lebih stabil lintas ukuran layar dibanding clip-path
+   SVG statis, karena otomatis ikut geser lewat transform yang sama dengan
+   .nav-indicator (tanpa perlu hitung ulang path tiap resize). Lingkaran
+   terangkatnya sendiri TIDAK digambar di sini — itu datang langsung dari
+   .nav-item-icon milik item yang sedang aktif, supaya cuma ada satu sumber
+   kebenaran render (menghindari dua lingkaran dobel/nggak sinkron). */
 .nav-indicator {
   position: absolute;
-  top: 8px; bottom: 8px; left: 8px;
+  top: -14px; height: 54px;
+  left: 8px;
   width: calc((100% - 16px) / 5);
-  border-radius: 18px;
-  background: linear-gradient(160deg, rgba(191,151,82,0.16), rgba(191,151,82,0.09));
-  border: 1px solid rgba(191,151,82,0.18);
-  transition: transform 0.38s var(--ease-spring);
+  display: flex; align-items: flex-start; justify-content: center;
+  transition: transform 0.4s var(--ease-spring);
   pointer-events: none;
   z-index: 0;
 }
+.nav-indicator::before {
+  /* Dudukan cekung di badan bar — melebar tipis di bawah lingkaran supaya
+     terlihat seperti bar "melekuk" menampung lingkaran, persis referensi. */
+  content: '';
+  position: absolute;
+  top: 14px; left: 50%; transform: translateX(-50%);
+  width: 60px; height: 40px;
+  background: radial-gradient(circle at 50% 0%, var(--bg) 0%, var(--bg) 52%, transparent 74%);
+  opacity: 0.9;
+}
+
 .nav-item {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   color: var(--text-tertiary); font-size: 10px; font-weight: 600;
-  padding: 9px 4px 8px; letter-spacing: 0.005em;
+  padding: 6px 4px; letter-spacing: 0.005em;
   border-radius: 16px;
   position: relative; z-index: 1;
   flex: 1;
   min-width: 0;
-  transition: color 0.22s ease, transform 0.15s var(--ease-spring);
+  height: 54px;
+  transition: color 0.18s ease, transform 0.15s var(--ease-spring);
 }
-.nav-item svg { display: block; transition: transform 0.25s var(--ease-spring); }
-.nav-item span { line-height: 1; white-space: nowrap; }
+.nav-item-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  transition: transform 0.22s var(--ease-spring), color 0.18s ease;
+}
+.nav-item svg { display: block; transition: transform 0.22s var(--ease-spring), color 0.18s ease; }
+.nav-item span:last-child { line-height: 1; white-space: nowrap; transition: color 0.18s ease; }
+
+/* Model "Shopee": item aktif TIDAK naik/berubah bentuk — cuma warnanya yang
+   berpindah ke brass (ikon + label sekaligus). Simpel, stabil, tidak ada
+   lompatan tata-letak sama sekali antar tab. */
 .nav-item.active { color: var(--brass-600); }
-[data-theme="dark"] .nav-item.active { color: var(--brass-300); }
-.nav-item.active svg { transform: translateY(-1px) scale(1.05); }
+[data-theme="dark"] .nav-item.active { color: var(--brass-400); }
+.nav-item.active .nav-item-icon svg { color: inherit; }
 .nav-item:active { transform: scale(0.92); }
 
-/* Tombol Keluar: warna netral seperti nav lain saat idle, memerah lembut hanya saat ditekan/aktif — supaya tidak terlihat seperti error state permanen di navbar */
-.nav-item-logout.active { color: var(--red-500); }
-[data-theme="dark"] .nav-item-logout.active { color: #E08A76; }
+/* Sembunyikan notch cekung — tidak dipakai lagi pada model warna-saja ini. */
+.nav-indicator { display: none; }
+.nav-indicator.on-fab::before { opacity: 0; }
 
+/* Tombol Keluar: SELALU merah (idle maupun aktif), supaya user langsung
+   paham ini aksi logout, bukan tab navigasi biasa. */
+.nav-item-logout,
+.nav-item-logout .nav-item-icon svg { color: var(--red-500); }
+[data-theme="dark"] .nav-item-logout,
+[data-theme="dark"] .nav-item-logout .nav-item-icon svg { color: #E08A76; }
+.nav-item-logout.active,
+.nav-item-logout.active .nav-item-icon svg { color: var(--red-600); }
+[data-theme="dark"] .nav-item-logout.active,
+[data-theme="dark"] .nav-item-logout.active .nav-item-icon svg { color: #E8A18F; }
+
+/* ============ FAB — kamera premium, lingkaran bulat sempurna, ikon besar ============ */
 .nav-fab {
-  width: 54px; height: 54px; border-radius: 50%;
+  position: relative;
+  width: 60px; height: 60px; min-width: 60px; max-width: 60px; border-radius: 50%;
+  aspect-ratio: 1 / 1;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(155deg, var(--brass-400), var(--brass-600));
+  background: linear-gradient(155deg, var(--brass-300), var(--brass-600));
   color: var(--ink-950);
-  box-shadow: 0 10px 24px -8px rgba(191,151,82,0.6), inset 0 1px 0 rgba(255,255,255,0.32);
-  transition: transform 0.16s var(--ease-spring), box-shadow 0.2s ease;
-  flex: 1;
+  box-shadow:
+    0 10px 26px -6px rgba(191,151,82,0.65),
+    0 0 0 5px var(--bg),
+    inset 0 1px 0 rgba(255,255,255,0.4);
+  transition: transform 0.16s var(--ease-spring), box-shadow 0.4s ease;
+  flex: 0 0 auto;
   z-index: 1;
-  /* Dibungkus dalam kolom flex yang SAMA lebarnya dengan nav-item lain,
-     supaya math indicator (100%/5, translateX(index*100%)) presisi align
-     dengan lingkaran FAB di tengah — bukan cuma dengan "kira-kira tengah". */
-  margin: 0 auto;
+  margin: 0 8px;
+  transform: translateY(-10px);
+  animation: fab-glow-pulse 2.6s ease-in-out infinite;
 }
-.nav-fab:active { transform: scale(0.9); }
+.nav-fab svg { position: relative; z-index: 2; width: 30px; height: 30px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15)); }
+/* Cincin cahaya berdenyut halus di belakang FAB — kesan "kamera menyala",
+   dibuat dari box-shadow terpisah supaya tidak ikut ter-scale saat :active. */
+.nav-fab::before {
+  content: '';
+  position: absolute; inset: -6px; border-radius: 50%;
+  border: 1.5px solid rgba(191,151,82,0.45);
+  animation: fab-ring-pulse 2.6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes fab-glow-pulse {
+  0%, 100% { box-shadow: 0 10px 26px -6px rgba(191,151,82,0.65), 0 0 0 5px var(--bg), inset 0 1px 0 rgba(255,255,255,0.4); }
+  50% { box-shadow: 0 10px 30px -4px rgba(191,151,82,0.95), 0 0 0 5px var(--bg), inset 0 1px 0 rgba(255,255,255,0.4); }
+}
+@keyframes fab-ring-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.18); opacity: 0; }
+}
+.nav-fab:active { transform: translateY(-8px) scale(0.9); }
+@media (prefers-reduced-motion: reduce) {
+  .nav-fab, .nav-fab::before { animation: none !important; }
+}
 
 /* ============ ACTION SHEET (pilih masuk/keluar) ============ */
 .sheet-overlay {
@@ -715,6 +784,13 @@ input { font-family: inherit; }
 }
 
 .history-thumb { width: 52px; height: 52px; border-radius: var(--radius-sm); object-fit: cover; flex-shrink: 0; background: var(--surface-strong); }
+/* Fallback rapi kalau foto selfie gagal dimuat — kotak netral + ikon kamera,
+   bukan ikon broken-image bawaan browser yang keliatan jelek. */
+.history-thumb-fallback {
+  background: var(--surface-strong)
+    url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M8 6.5L9.2 4.3C9.5 3.8 10 3.5 10.6 3.5H13.4C14 3.5 14.5 3.8 14.8 4.3L16 6.5H19C20.1 6.5 21 7.4 21 8.5V17.5C21 18.6 20.1 19.5 19 19.5H5C3.9 19.5 3 18.6 3 17.5V8.5C3 7.4 3.9 6.5 5 6.5H8Z' stroke='%23808894' stroke-width='1.6' stroke-linejoin='round'/%3E%3Ccircle cx='12' cy='13' r='3.4' stroke='%23808894' stroke-width='1.6'/%3E%3C/svg%3E")
+    center / 24px no-repeat;
+}
 .history-info { flex: 1; min-width: 0; }
 .history-top-row { display: flex; align-items: center; gap: 8px; }
 .history-type { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 100px; letter-spacing: 0.01em; }

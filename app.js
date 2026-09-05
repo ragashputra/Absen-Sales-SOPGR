@@ -1127,7 +1127,7 @@ function renderHistory(list) {
     const div = document.createElement('div');
     div.className = 'history-item';
     div.innerHTML = `
-      <img class="history-thumb" src="${item.photoUrl}" loading="lazy" alt="">
+      <img class="history-thumb" src="${toThumbnailUrl(item.photoUrl)}" loading="lazy" alt="Foto selfie absensi">
       <div class="history-info">
         <div class="history-top-row">
           <span class="history-type ${item.type === 'Masuk' ? 'masuk' : 'keluar'}">${item.type}</span>
@@ -1137,10 +1137,30 @@ function renderHistory(list) {
       </div>
       <div class="history-time">${safeTimeText(item.time)}</div>
     `;
+    const img = div.querySelector('.history-thumb');
+    // Fallback berlapis kalau foto gagal dimuat (link lama format "uc?export=view",
+    // foto dihapus manual dari Drive, atau lagi offline): jangan biarkan ikon
+    // broken-image jelek nongol — ganti jadi ikon kamera netral yang tetap rapi.
+    img.addEventListener('error', () => {
+      img.classList.add('history-thumb-fallback');
+      img.removeAttribute('src');
+    }, { once: true });
     div.addEventListener('click', () => window.open(item.mapsLink, '_blank'));
     frag.appendChild(div);
   });
   container.appendChild(frag);
+}
+
+// Menormalkan URL foto Drive lama ("uc?export=view", link "open?id=", dsb.) ke
+// format "thumbnail?id=" yang jauh lebih stabil di-render sebagai <img src>
+// di browser/PWA — supaya riwayat lama pun tetap tampil, bukan cuma yang baru.
+function toThumbnailUrl(url) {
+  if (!url) return '';
+  const match = String(url).match(/[?&]id=([a-zA-Z0-9_-]+)/) || String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w400`;
+  }
+  return url;
 }
 
 function formatHistoryDate(dateStr) {

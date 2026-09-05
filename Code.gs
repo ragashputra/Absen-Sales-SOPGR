@@ -169,7 +169,11 @@ function recordAttendance(payload) {
     const file = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-    const photoUrl = `https://drive.google.com/uc?export=view&id=${file.getId()}`;
+    // Format thumbnail Google Drive (bukan "uc?export=view") — jauh lebih stabil
+    // dipakai sebagai <img src> di browser/PWA karena tidak diarahkan ke halaman
+    // preview Drive dan jarang kena blokir hotlink seperti format "uc?export=view".
+    // "sz=w1000" artinya lebar render maksimum ~1000px (cukup tajam utk thumbnail riwayat).
+    const photoUrl = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w1000`;
     const mapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
