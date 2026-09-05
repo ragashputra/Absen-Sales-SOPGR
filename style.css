@@ -245,7 +245,9 @@ input { font-family: inherit; }
 #card-keluar.filled .status-icon { color: var(--brass-600); }
 .status-label { font-size: 12.5px; font-weight: 600; color: var(--ink-600); letter-spacing: 0.01em; }
 .status-value { font-family: var(--font-mono); font-size: 21px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink-900); }
-.status-window { font-size: 10.5px; color: var(--paper-ink); margin-top: 5px; letter-spacing: 0.005em; }
+.status-window { font-size: 10.5px; color: var(--paper-ink); margin-top: 5px; letter-spacing: 0.005em; transition: color 0.2s ease; }
+#card-masuk.filled .status-window { color: var(--sage-600); font-weight: 600; }
+#card-keluar.filled .status-window { color: var(--brass-600); font-weight: 600; }
 
 .section-heading {
   font-size: 13px; font-weight: 700; color: var(--ink-700);
@@ -318,6 +320,8 @@ input { font-family: inherit; }
   transition: opacity 0.22s ease;
 }
 .sheet-overlay.hidden { opacity: 0; pointer-events: none; }
+.sheet-overlay.leaving { opacity: 0; pointer-events: none; }
+.sheet-overlay.leaving .sheet-box, .sheet-overlay.hidden .sheet-box { transform: translateY(100%); }
 .sheet-box {
   width: 100%; max-width: 480px;
   background: var(--paper-100);
@@ -326,7 +330,6 @@ input { font-family: inherit; }
   transform: translateY(0);
   transition: transform 0.26s var(--ease-out);
 }
-.sheet-overlay.hidden .sheet-box { transform: translateY(100%); }
 .sheet-handle { width: 38px; height: 4px; border-radius: 100px; background: var(--paper-300); margin: 0 auto 16px; }
 .sheet-title { font-size: 15px; font-weight: 700; color: var(--ink-800); margin-bottom: 14px; letter-spacing: -0.005em; }
 .sheet-option {
@@ -484,7 +487,7 @@ input { font-family: inherit; }
 .success-sub { font-size: 14px; color: var(--paper-ink); line-height: 1.5; margin-bottom: 30px; }
 
 /* ============ HISTORY SCREEN ============ */
-.history-body { flex: 1; overflow-y: auto; padding: 4px 22px calc(var(--safe-bottom) + 20px); display: flex; flex-direction: column; gap: 10px; }
+.history-body { flex: 1; overflow-y: auto; padding: 4px 22px calc(var(--safe-bottom) + 96px); display: flex; flex-direction: column; gap: 10px; }
 .history-item { display: flex; gap: 12px; padding: 12px; background: var(--paper-200); border-radius: var(--radius-md); align-items: center; transition: transform 0.14s var(--ease-spring); border: 1px solid rgba(16,18,22,0.05); }
 .history-item:not(.skeleton):active { transform: scale(0.98); }
 .history-empty { text-align: center; color: var(--paper-ink); padding: 60px 20px; font-size: 14px; }
@@ -498,9 +501,17 @@ input { font-family: inherit; }
   z-index: 500; box-shadow: 0 12px 32px rgba(0,0,0,0.3);
   border: 1px solid rgba(255,255,255,0.06);
   animation: toast-in 0.3s var(--ease-out);
+  opacity: 1; transform: translateY(0);
 }
+/* State transisi keluar: dipicu SEBELUM class .hidden ditambahkan (lihat app.js),
+   supaya opacity/transform sempat animasi dulu baru display:none menyusul. */
+.toast.leaving {
+  animation: toast-out 0.22s var(--ease-out) forwards;
+}
+.toast.hidden { display: none; opacity: 0; }
 .toast.error { background: var(--red-500); border-color: transparent; }
 @keyframes toast-in { from { transform: translateY(14px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes toast-out { from { transform: translateY(0); opacity: 1; } to { transform: translateY(10px); opacity: 0; } }
 
 /* ============ MODAL ============ */
 .modal-overlay {
@@ -592,4 +603,140 @@ input { font-family: inherit; }
 /* ============ FOCUS VISIBLE ============ */
 button:focus-visible, input:focus-visible {
   outline: 2px solid var(--brass-500); outline-offset: 2px;
+}
+
+/* ============================================
+   POLISH PASS — animasi & transisi halus
+   di seluruh lini interaksi
+   ============================================ */
+
+/* ---- Status card: transisi halus saat berubah jadi "filled" ---- */
+.status-card {
+  transition: border-color 0.35s var(--ease-out), background 0.35s var(--ease-out),
+              box-shadow 0.35s var(--ease-out), transform 0.2s var(--ease-spring);
+}
+.status-card.filled {
+  animation: status-pop 0.45s var(--ease-spring);
+}
+@keyframes status-pop {
+  0% { transform: scale(0.97); }
+  55% { transform: scale(1.015); }
+  100% { transform: scale(1); }
+}
+.status-value { transition: color 0.25s ease; }
+.status-icon svg { transition: transform 0.3s var(--ease-spring); }
+.status-card.filled .status-icon svg { transform: scale(1.08); }
+
+/* ---- Profile avatar: masuk dengan micro-entrance ---- */
+.profile-avatar {
+  animation: avatar-in 0.4s var(--ease-spring);
+  transition: transform 0.15s var(--ease-spring);
+}
+@keyframes avatar-in {
+  from { opacity: 0; transform: scale(0.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+.profile-name, .profile-role { animation: fade-slide-in 0.4s var(--ease-out); }
+.profile-role { animation-delay: 0.03s; animation-fill-mode: backwards; }
+@keyframes fade-slide-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.datetime-card { animation: fade-slide-in 0.42s var(--ease-out) 0.04s backwards; }
+.status-rail > *:nth-child(1) { animation: fade-slide-in 0.42s var(--ease-out) 0.08s backwards; }
+.status-rail > *:nth-child(2) { animation: fade-slide-in 0.42s var(--ease-out) 0.12s backwards; }
+.section-heading { animation: fade-slide-in 0.42s var(--ease-out) 0.16s backwards; }
+
+/* ---- Riwayat: setiap card masuk dengan stagger halus ---- */
+.recent-day-group, .history-item:not(.skeleton) {
+  animation: fade-slide-in 0.38s var(--ease-out) backwards;
+}
+.recent-day-group:nth-child(1), .history-item:nth-child(1) { animation-delay: 0.02s; }
+.recent-day-group:nth-child(2), .history-item:nth-child(2) { animation-delay: 0.06s; }
+.recent-day-group:nth-child(3), .history-item:nth-child(3) { animation-delay: 0.10s; }
+.recent-day-group:nth-child(4), .history-item:nth-child(4) { animation-delay: 0.14s; }
+.recent-day-group:nth-child(5), .history-item:nth-child(5) { animation-delay: 0.18s; }
+.recent-day-group:nth-child(6), .history-item:nth-child(6) { animation-delay: 0.22s; }
+.recent-day-group:nth-child(7), .history-item:nth-child(7) { animation-delay: 0.26s; }
+
+.recent-row-time, .history-time { transition: color 0.2s ease; }
+.recent-day-group { transition: transform 0.15s var(--ease-spring), box-shadow 0.15s ease; }
+.recent-day-group:active { transform: scale(0.985); }
+
+/* ---- Bottom nav: transisi lebih hidup ---- */
+.nav-item {
+  transition: color 0.2s ease, background 0.25s var(--ease-out), transform 0.15s var(--ease-spring);
+}
+.nav-item:active { transform: scale(0.92); }
+.nav-item.active::after { animation: dot-pop 0.3s var(--ease-spring); }
+@keyframes dot-pop {
+  from { opacity: 0; transform: scale(0); }
+  to { opacity: 1; transform: scale(1); }
+}
+.nav-fab { transition: transform 0.16s var(--ease-spring), box-shadow 0.2s ease; }
+.nav-fab:hover { box-shadow: 0 12px 26px -8px rgba(191,151,82,0.65), inset 0 1px 0 rgba(255,255,255,0.32); }
+
+/* ---- Icon buttons: micro feedback konsisten di semua tombol ikon ---- */
+.icon-btn svg { transition: transform 0.2s var(--ease-spring); }
+.icon-btn:active svg { transform: scale(0.88); }
+
+/* ---- Employee list: stagger masuk saat pertama render ---- */
+.employee-item {
+  animation: fade-slide-in 0.32s var(--ease-out) backwards;
+}
+.employee-item:nth-child(1) { animation-delay: 0.02s; }
+.employee-item:nth-child(2) { animation-delay: 0.05s; }
+.employee-item:nth-child(3) { animation-delay: 0.08s; }
+.employee-item:nth-child(4) { animation-delay: 0.11s; }
+.employee-item:nth-child(5) { animation-delay: 0.14s; }
+.employee-item:nth-child(6) { animation-delay: 0.17s; }
+.employee-item:nth-child(n+7) { animation-delay: 0.2s; }
+
+/* ---- GPS panel: transisi status lebih hidup ---- */
+.gps-panel { transition: border-color 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out), background 0.3s ease; }
+.gps-status-text, .gps-address { transition: color 0.25s ease; }
+.gps-coords { transition: opacity 0.2s ease; }
+
+/* ---- Shutter button: feedback tekan lebih tegas ---- */
+.shutter-btn { transition: transform 0.12s var(--ease-spring), opacity 0.2s ease; }
+.shutter-ring { transition: border-color 0.25s ease; }
+
+/* ---- Modal: entrance yang lebih halus (bukan cuma muncul instan) ---- */
+.modal-overlay { transition: opacity 0.22s var(--ease-out); }
+.modal-overlay.hidden { opacity: 0; pointer-events: none; }
+.modal-box { animation: modal-in 0.3s var(--ease-spring); }
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* (Toast exit animation sudah ditangani lewat class .leaving di bagian TOAST di atas) */
+
+/* ---- Sheet option buttons: sedikit stagger saat sheet terbuka ---- */
+.sheet-option { animation: fade-slide-in 0.3s var(--ease-out) backwards; }
+.sheet-option:nth-child(2) { animation-delay: 0.03s; }
+.sheet-option:nth-child(3) { animation-delay: 0.06s; }
+
+/* ---- Preview & success screen: elemen muncul halus ---- */
+.preview-info { animation: fade-slide-in 0.35s var(--ease-out) 0.05s backwards; }
+.success-mark, .success-title, .success-sub, .btn-full { animation: fade-slide-in 0.4s var(--ease-out) backwards; }
+.success-title { animation-delay: 0.08s; }
+.success-sub { animation-delay: 0.14s; }
+.btn-full { animation-delay: 0.2s; }
+
+/* ---- Camera mode chip: transisi halus saat teks berganti ---- */
+.camera-mode-chip { transition: background 0.2s ease, border-color 0.2s ease; }
+
+/* ---- Respect reduced motion: matikan semua animasi dekoratif di atas ---- */
+@media (prefers-reduced-motion: reduce) {
+  .status-card.filled,
+  .profile-avatar, .profile-name, .profile-role,
+  .datetime-card, .status-rail > *, .section-heading,
+  .recent-day-group, .history-item, .employee-item,
+  .nav-item.active::after, .modal-box, .toast,
+  .sheet-option, .preview-info, .success-mark,
+  .success-title, .success-sub, .btn-full {
+    animation: none !important;
+  }
 }

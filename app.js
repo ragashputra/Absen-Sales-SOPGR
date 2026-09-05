@@ -65,24 +65,22 @@ function attachEventListeners() {
   document.getElementById('btn-shutter').addEventListener('click', capturePhoto);
   document.getElementById('btn-retake').addEventListener('click', retakePhoto);
   document.getElementById('btn-submit').addEventListener('click', submitAttendance);
-  document.getElementById('btn-back-home').addEventListener('click', () => {
-    showScreen('screen-home');
-    refreshTodayStatus();
-    refreshRecentHistory();
-  });
+  document.getElementById('btn-back-home').addEventListener('click', goToHome);
 
-  // Bottom nav
-  document.getElementById('nav-home').addEventListener('click', () => {
-    setBottomNavActive('nav-home');
-    showScreen('screen-home');
-    refreshTodayStatus();
-    refreshRecentHistory();
+  // Bottom nav — ada 2 salinan (di screen-home & screen-history) supaya nav
+  // selalu tampil di kedua layar; keduanya dihubungkan ke fungsi yang sama.
+  ['nav-home', 'nav-home-2'].forEach(id => {
+    document.getElementById(id).addEventListener('click', goToHome);
   });
-  document.getElementById('nav-history').addEventListener('click', () => {
-    setBottomNavActive('nav-history');
-    openHistory();
+  ['nav-history', 'nav-history-2'].forEach(id => {
+    document.getElementById(id).addEventListener('click', () => {
+      setBottomNavActive('history');
+      openHistory();
+    });
   });
-  document.getElementById('btn-open-absen').addEventListener('click', openAbsenSheet);
+  ['btn-open-absen', 'btn-open-absen-2'].forEach(id => {
+    document.getElementById(id).addEventListener('click', openAbsenSheet);
+  });
 
   // Action sheet: pilih Absen Masuk / Absen Keluar
   document.getElementById('sheet-btn-masuk').addEventListener('click', () => {
@@ -97,10 +95,13 @@ function attachEventListeners() {
   document.getElementById('sheet-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'sheet-overlay') closeAbsenSheet();
   });
-  document.getElementById('btn-history-back').addEventListener('click', () => {
-    setBottomNavActive('nav-home');
-    showScreen('screen-home');
-  });
+}
+
+function goToHome() {
+  setBottomNavActive('home');
+  showScreen('screen-home');
+  refreshTodayStatus();
+  refreshRecentHistory();
 }
 
 /* ============================================
@@ -119,11 +120,21 @@ function openAbsenSheet() {
   document.getElementById('sheet-overlay').classList.remove('hidden');
 }
 function closeAbsenSheet() {
-  document.getElementById('sheet-overlay').classList.add('hidden');
+  const overlay = document.getElementById('sheet-overlay');
+  overlay.classList.add('leaving'); // trigger transisi keluar (opacity + slide down) dulu
+  setTimeout(() => {
+    overlay.classList.add('hidden');
+    overlay.classList.remove('leaving');
+  }, 260); // cocok dengan durasi transform sheet-box (0.26s)
 }
 
-function setBottomNavActive(id) {
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.id === id));
+function setBottomNavActive(target) {
+  // target: 'home' | 'history' — mengatur kedua salinan nav (di screen-home & screen-history) sekaligus
+  document.querySelectorAll('.nav-item').forEach(el => {
+    const isHome = el.id === 'nav-home' || el.id === 'nav-home-2';
+    const isHistory = el.id === 'nav-history' || el.id === 'nav-history-2';
+    el.classList.toggle('active', (target === 'home' && isHome) || (target === 'history' && isHistory));
+  });
 }
 
 function attachConnectivityListeners() {
@@ -239,6 +250,7 @@ function selectEmployee(emp) {
   document.getElementById('home-employee-name').textContent = emp.name;
   document.getElementById('home-employee-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
   document.getElementById('home-employee-avatar').textContent = initials(emp.name);
+  setBottomNavActive('home');
   showScreen('screen-home');
   refreshTodayStatus();
   refreshRecentHistory();
@@ -290,21 +302,31 @@ function setStatusLoading(isLoading) {
 function renderTodayStatus(data) {
   const cardMasuk = document.getElementById('card-masuk');
   const cardKeluar = document.getElementById('card-keluar');
+  const windowMasuk = document.getElementById('status-masuk-window');
+  const windowKeluar = document.getElementById('status-keluar-window');
 
   if (data.masuk) {
     cardMasuk.classList.add('filled');
     document.getElementById('status-masuk-time').textContent = data.masuk.time;
+    windowMasuk.textContent = `Tercatat ${data.masuk.time} WIB`;
+    windowMasuk.title = data.masuk.address || '';
   } else {
     cardMasuk.classList.remove('filled');
     document.getElementById('status-masuk-time').textContent = '--:--';
+    windowMasuk.textContent = 'Belum absen';
+    windowMasuk.removeAttribute('title');
   }
 
   if (data.keluar) {
     cardKeluar.classList.add('filled');
     document.getElementById('status-keluar-time').textContent = data.keluar.time;
+    windowKeluar.textContent = `Tercatat ${data.keluar.time} WIB`;
+    windowKeluar.title = data.keluar.address || '';
   } else {
     cardKeluar.classList.remove('filled');
     document.getElementById('status-keluar-time').textContent = '--:--';
+    windowKeluar.textContent = 'Belum absen';
+    windowKeluar.removeAttribute('title');
   }
   // Tombol Absen Masuk/Keluar kini ada di action sheet (tombol + bottom nav),
   // status enable/disable-nya diatur di openAbsenSheet() berdasarkan state.todayStatus.
@@ -607,7 +629,7 @@ function closeCamera() {
   stopCameraStream();
   stopGpsWatch();
   clearInterval(state.timestampInterval);
-  showScreen('screen-home');
+  goToHome();
 }
 
 function stopCameraStream() {
@@ -721,7 +743,7 @@ async function submitAttendance() {
         icon: 'warn',
         title: 'Absensi sudah tercatat',
         message: data.error,
-        actions: [{ label: 'Oke', style: 'solid', onClick: () => { showScreen('screen-home'); refreshTodayStatus(); refreshRecentHistory(); } }]
+        actions: [{ label: 'Oke', style: 'solid', onClick: goToHome }]
       });
     } else {
       throw new Error(data.error || 'Gagal mengirim absen');
@@ -1060,12 +1082,22 @@ function showModal({ icon, title, message, actions }) {
 }
 
 let toastTimeout;
+let toastLeaveTimeout;
 function showToast(message, isError) {
   const toast = document.getElementById('toast');
-  toast.textContent = message;
-  toast.className = 'toast' + (isError ? ' error' : '');
   clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => toast.classList.add('hidden'), 3500);
+  clearTimeout(toastLeaveTimeout);
+
+  toast.textContent = message;
+  toast.className = 'toast' + (isError ? ' error' : ''); // reset: hapus 'leaving'/'hidden', munculkan lagi dgn animasi toast-in
+
+  toastTimeout = setTimeout(() => {
+    toast.classList.add('leaving'); // mulai animasi fade-out halus
+    toastLeaveTimeout = setTimeout(() => {
+      toast.classList.add('hidden'); // baru display:none setelah animasi selesai
+      toast.classList.remove('leaving');
+    }, 220);
+  }, 3500);
 }
 
 function escapeHtml(str) {
