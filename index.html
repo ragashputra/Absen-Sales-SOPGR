@@ -71,57 +71,92 @@
 
 <!-- ===== SCREEN: HOME / DASHBOARD ===== -->
 <div id="screen-home" class="screen">
-  <header class="topbar topbar-home">
-    <button id="btn-logout" class="icon-btn" aria-label="Ganti pengguna">
+  <header class="topbar-profile">
+    <button id="btn-logout" class="icon-btn" aria-label="Keluar / ganti pengguna">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <div class="topbar-title topbar-title-center">
-      <span class="topbar-title-main" id="home-employee-name">—</span>
-      <span class="topbar-title-sub" id="home-employee-branch">—</span>
+    <div class="profile-block">
+      <div class="profile-name" id="home-employee-name">—</div>
+      <div class="profile-role" id="home-employee-branch">—</div>
     </div>
-    <div class="topbar-spacer"></div>
+    <div class="profile-avatar" id="home-employee-avatar">—</div>
   </header>
 
   <div class="home-body">
-    <div class="clock-block">
-      <div class="clock-time" id="live-clock">--:--</div>
-      <div class="clock-date" id="live-date">—</div>
+    <div class="datetime-card">
+      <span id="home-date">—</span>
+      <span class="datetime-divider"></span>
+      <span class="datetime-clock" id="live-clock">--:--</span>
     </div>
 
     <div class="status-rail">
-      <div class="status-card" id="card-masuk">
+      <div class="status-card status-card-in" id="card-masuk">
         <div class="status-card-head">
-          <span class="status-dot"></span>
-          <span class="status-label">Absen Masuk</span>
+          <span class="status-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="status-label">Masuk</span>
         </div>
-        <div class="status-value" id="status-masuk-time">Belum absen</div>
-        <div class="status-detail" id="status-masuk-addr"></div>
+        <div class="status-value" id="status-masuk-time">--:--</div>
+        <div class="status-window">Jendela absen 00:01–11:59</div>
       </div>
-      <div class="status-card" id="card-keluar">
+      <div class="status-card status-card-out" id="card-keluar">
         <div class="status-card-head">
-          <span class="status-dot"></span>
-          <span class="status-label">Absen Keluar</span>
+          <span class="status-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="status-label">Pulang</span>
         </div>
-        <div class="status-value" id="status-keluar-time">Belum absen</div>
-        <div class="status-detail" id="status-keluar-addr"></div>
+        <div class="status-value" id="status-keluar-time">--:--</div>
+        <div class="status-window">Jendela absen 12:00–23:59</div>
       </div>
     </div>
 
-    <div class="action-grid">
-      <button class="action-btn action-btn-in" id="btn-absen-masuk">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Absensi Masuk</span>
-      </button>
-      <button class="action-btn action-btn-out" id="btn-absen-keluar">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Absensi Keluar</span>
-      </button>
+    <div class="section-heading">Riwayat Presensi</div>
+    <div class="recent-history" id="recent-history">
+      <!-- populated by app.js: 7 hari terakhir, grouped per tanggal -->
     </div>
+  </div>
 
-    <button class="history-link" id="btn-history">
-      <span>Riwayat absensi</span>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <nav class="bottom-nav">
+    <button class="nav-item active" id="nav-home">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><path d="M3 11.5L12 4l9 7.5M5 10v9a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1v-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Home</span>
     </button>
+    <button class="nav-fab" id="btn-open-absen" aria-label="Absen">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+    </button>
+    <button class="nav-item" id="nav-history">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Riwayat</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ===== SHEET: PILIH ABSEN MASUK/KELUAR ===== -->
+<div id="sheet-overlay" class="sheet-overlay hidden">
+  <div class="sheet-box">
+    <div class="sheet-handle"></div>
+    <h3 class="sheet-title">Pilih jenis absen</h3>
+    <button class="sheet-option" id="sheet-btn-masuk">
+      <span class="sheet-option-icon sheet-icon-in">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="sheet-option-text">
+        <span class="sheet-option-title">Absen Masuk</span>
+        <span class="sheet-option-sub">Mulai jam kerja hari ini</span>
+      </span>
+    </button>
+    <button class="sheet-option" id="sheet-btn-keluar">
+      <span class="sheet-option-icon sheet-icon-out">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="sheet-option-text">
+        <span class="sheet-option-title">Absen Keluar</span>
+        <span class="sheet-option-sub">Akhiri jam kerja hari ini</span>
+      </span>
+    </button>
+    <button class="sheet-cancel" id="sheet-btn-cancel">Batal</button>
   </div>
 </div>
 

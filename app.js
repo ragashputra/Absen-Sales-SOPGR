@@ -61,8 +61,6 @@ async function init() {
 function attachEventListeners() {
   document.getElementById('employee-search').addEventListener('input', onSearchInput);
   document.getElementById('btn-logout').addEventListener('click', onLogout);
-  document.getElementById('btn-absen-masuk').addEventListener('click', () => openCamera('masuk'));
-  document.getElementById('btn-absen-keluar').addEventListener('click', () => openCamera('keluar'));
   document.getElementById('btn-camera-close').addEventListener('click', closeCamera);
   document.getElementById('btn-shutter').addEventListener('click', capturePhoto);
   document.getElementById('btn-retake').addEventListener('click', retakePhoto);
@@ -70,9 +68,62 @@ function attachEventListeners() {
   document.getElementById('btn-back-home').addEventListener('click', () => {
     showScreen('screen-home');
     refreshTodayStatus();
+    refreshRecentHistory();
   });
-  document.getElementById('btn-history').addEventListener('click', openHistory);
-  document.getElementById('btn-history-back').addEventListener('click', () => showScreen('screen-home'));
+
+  // Bottom nav
+  document.getElementById('nav-home').addEventListener('click', () => {
+    setBottomNavActive('nav-home');
+    showScreen('screen-home');
+    refreshTodayStatus();
+    refreshRecentHistory();
+  });
+  document.getElementById('nav-history').addEventListener('click', () => {
+    setBottomNavActive('nav-history');
+    openHistory();
+  });
+  document.getElementById('btn-open-absen').addEventListener('click', openAbsenSheet);
+
+  // Action sheet: pilih Absen Masuk / Absen Keluar
+  document.getElementById('sheet-btn-masuk').addEventListener('click', () => {
+    closeAbsenSheet();
+    openCamera('masuk');
+  });
+  document.getElementById('sheet-btn-keluar').addEventListener('click', () => {
+    closeAbsenSheet();
+    openCamera('keluar');
+  });
+  document.getElementById('sheet-btn-cancel').addEventListener('click', closeAbsenSheet);
+  document.getElementById('sheet-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'sheet-overlay') closeAbsenSheet();
+  });
+  document.getElementById('btn-history-back').addEventListener('click', () => {
+    setBottomNavActive('nav-home');
+    showScreen('screen-home');
+  });
+}
+
+/* ============================================
+   ACTION SHEET — pilih Absen Masuk / Keluar
+   ============================================ */
+function openAbsenSheet() {
+  // Sinkronkan status tombol di sheet dengan status hari ini
+  const masukDone = !!(state.todayStatus && state.todayStatus.masuk);
+  const keluarDone = !!(state.todayStatus && state.todayStatus.keluar);
+
+  const btnMasuk = document.getElementById('sheet-btn-masuk');
+  const btnKeluar = document.getElementById('sheet-btn-keluar');
+  btnMasuk.disabled = masukDone;
+  btnKeluar.disabled = keluarDone || !masukDone;
+
+  document.getElementById('sheet-overlay').classList.remove('hidden');
+}
+function closeAbsenSheet() {
+  document.getElementById('sheet-overlay').classList.add('hidden');
+}
+
+function setBottomNavActive(id) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.id === id));
 }
 
 function attachConnectivityListeners() {
@@ -109,8 +160,8 @@ function startClock() {
 function updateClock() {
   const now = new Date();
   const timeEl = document.getElementById('live-clock');
-  const dateEl = document.getElementById('live-date');
-  if (timeEl) timeEl.textContent = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
+  const dateEl = document.getElementById('home-date');
+  if (timeEl) timeEl.textContent = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: TZ });
   if (dateEl) dateEl.textContent = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
 }
 function formatDateTimeWIB(date) {
@@ -187,8 +238,10 @@ function selectEmployee(emp) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(emp));
   document.getElementById('home-employee-name').textContent = emp.name;
   document.getElementById('home-employee-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
+  document.getElementById('home-employee-avatar').textContent = initials(emp.name);
   showScreen('screen-home');
   refreshTodayStatus();
+  refreshRecentHistory();
   flushPendingQueue();
 }
 
@@ -237,32 +290,24 @@ function setStatusLoading(isLoading) {
 function renderTodayStatus(data) {
   const cardMasuk = document.getElementById('card-masuk');
   const cardKeluar = document.getElementById('card-keluar');
-  const btnMasuk = document.getElementById('btn-absen-masuk');
-  const btnKeluar = document.getElementById('btn-absen-keluar');
 
   if (data.masuk) {
     cardMasuk.classList.add('filled');
     document.getElementById('status-masuk-time').textContent = data.masuk.time;
-    document.getElementById('status-masuk-addr').textContent = data.masuk.address || '';
-    btnMasuk.disabled = true;
   } else {
     cardMasuk.classList.remove('filled');
-    document.getElementById('status-masuk-time').textContent = 'Belum absen';
-    document.getElementById('status-masuk-addr').textContent = '';
-    btnMasuk.disabled = false;
+    document.getElementById('status-masuk-time').textContent = '--:--';
   }
 
   if (data.keluar) {
     cardKeluar.classList.add('filled');
     document.getElementById('status-keluar-time').textContent = data.keluar.time;
-    document.getElementById('status-keluar-addr').textContent = data.keluar.address || '';
-    btnKeluar.disabled = true;
   } else {
     cardKeluar.classList.remove('filled');
-    document.getElementById('status-keluar-time').textContent = 'Belum absen';
-    document.getElementById('status-keluar-addr').textContent = '';
-    btnKeluar.disabled = !data.masuk; // harus absen masuk dulu
+    document.getElementById('status-keluar-time').textContent = '--:--';
   }
+  // Tombol Absen Masuk/Keluar kini ada di action sheet (tombol + bottom nav),
+  // status enable/disable-nya diatur di openAbsenSheet() berdasarkan state.todayStatus.
 }
 
 /* ============================================
@@ -676,7 +721,7 @@ async function submitAttendance() {
         icon: 'warn',
         title: 'Absensi sudah tercatat',
         message: data.error,
-        actions: [{ label: 'Oke', style: 'solid', onClick: () => { showScreen('screen-home'); refreshTodayStatus(); } }]
+        actions: [{ label: 'Oke', style: 'solid', onClick: () => { showScreen('screen-home'); refreshTodayStatus(); refreshRecentHistory(); } }]
       });
     } else {
       throw new Error(data.error || 'Gagal mengirim absen');
@@ -782,6 +827,7 @@ async function flushPendingQueue() {
     showToast(`${sentCount} absensi tertunda berhasil dikirim.`);
     if (document.getElementById('screen-home').classList.contains('active')) {
       refreshTodayStatus();
+      refreshRecentHistory();
     }
   }
 }
@@ -805,7 +851,92 @@ function showSuccess(data) {
 }
 
 /* ============================================
-   HISTORY
+   RIWAYAT RINGKAS DI HOME (7 hari terakhir)
+   ============================================ */
+async function refreshRecentHistory() {
+  const container = document.getElementById('recent-history');
+  if (!container || !state.employee) return;
+
+  const backendConfigured = isBackendConfigured();
+  if (!backendConfigured) {
+    container.innerHTML = '<div class="recent-history-empty">Riwayat akan muncul setelah backend Google Sheets terhubung.</div>';
+    return;
+  }
+
+  try {
+    const data = await fetchJsonWithTimeout(
+      `${CONFIG.APPS_SCRIPT_URL}?action=history&employeeId=${encodeURIComponent(state.employee.id)}&limit=50`,
+      {}, 10000
+    );
+    renderRecentHistory(data.history || []);
+  } catch (e) {
+    container.innerHTML = '<div class="recent-history-empty">Gagal memuat riwayat. Periksa koneksi internet.</div>';
+  }
+}
+
+function renderRecentHistory(list) {
+  const container = document.getElementById('recent-history');
+
+  // Kelompokkan per tanggal, urut terbaru dulu, ambil 7 tanggal unik terakhir
+  const byDate = new Map();
+  list.forEach(item => {
+    if (!byDate.has(item.date)) byDate.set(item.date, { masuk: null, keluar: null });
+    const group = byDate.get(item.date);
+    if (item.type === 'Masuk' && !group.masuk) group.masuk = item;
+    if (item.type === 'Keluar' && !group.keluar) group.keluar = item;
+  });
+
+  const dates = Array.from(byDate.keys())
+    .sort((a, b) => new Date(b) - new Date(a))
+    .slice(0, 7);
+
+  if (!dates.length) {
+    container.innerHTML = '<div class="recent-history-empty">Belum ada riwayat absensi.</div>';
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  dates.forEach(date => {
+    const group = byDate.get(date);
+    const div = document.createElement('div');
+    div.className = 'recent-day-group';
+    div.innerHTML = `
+      <div class="recent-day-date">${formatFullHistoryDate(date)}</div>
+      <div class="recent-day-rows">
+        ${renderRecentRow('in', 'Masuk', group.masuk)}
+        ${renderRecentRow('out', 'Pulang', group.keluar)}
+      </div>
+    `;
+    frag.appendChild(div);
+  });
+
+  container.innerHTML = '';
+  container.appendChild(frag);
+}
+
+function renderRecentRow(kind, label, entry) {
+  const icon = kind === 'in'
+    ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const time = entry ? entry.time : '—';
+  return `
+    <div class="recent-row">
+      <span class="recent-row-icon ${kind}">${icon}</span>
+      <span class="recent-row-label">${label}</span>
+      <span class="recent-row-time">${time}</span>
+    </div>
+  `;
+}
+
+function formatFullHistoryDate(dateStr) {
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
+  } catch (e) { return dateStr; }
+}
+
+/* ============================================
+   HISTORY (halaman penuh, dibuka dari bottom nav)
    ============================================ */
 async function openHistory() {
   showScreen('screen-history');

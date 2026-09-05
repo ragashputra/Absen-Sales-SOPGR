@@ -1,3 +1,10 @@
+> **Update UI Home:** halaman Beranda sekarang pakai layout profil (avatar + nama + jabatan di
+> atas), card tanggal/jam, dua status card ringkas (Masuk/Pulang) dengan keterangan jendela jam,
+> daftar **Riwayat Presensi 7 hari terakhir** langsung di Beranda, dan bottom navigation
+> (Home — tombol **+** tengah untuk buka pilihan Absen Masuk/Keluar — Riwayat). Semua warna tetap
+> memakai palet graphite + brass yang sudah ada, tidak ada token warna baru yang ditambahkan.
+> Riwayat lengkap (semua histori, dengan foto) tetap ada di halaman **Riwayat** dari bottom nav.
+
 # Absensi — PWA Absensi Selfie + GPS untuk Sales Freelance
 
 Aplikasi absensi berbasis PWA (installable di HP, tanpa perlu App Store) dengan foto selfie
