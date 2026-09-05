@@ -551,9 +551,16 @@ input { font-family: inherit; }
      ulang / "patah" saat elemen di atas-bawahnya berubah tinggi (mis. teks
      gps-address bertambah baris begitu alamat GPS masuk). Diposisikan lewat
      margin auto di flex container vertikal, jadi tetap center tanpa
-     numpang ke flex-grow yang dipengaruhi konten sekitarnya. */
-  flex: none; margin: 20px auto;
-  width: 68%; max-width: 260px; height: 34vh; max-height: 320px; min-height: 200px;
+     numpang ke flex-grow yang dipengaruhi konten sekitarnya.
+     UKURAN DIPERBESAR SIGNIFIKAN dari versi sebelumnya: oval yang terlalu
+     kecil relatif ke frame kamera memaksa user merentangkan tangan
+     sejauh-jauhnya supaya wajah "menyusut" cukup pas ke oval — pengalaman
+     yang janggal dan bikin bingung. Oval sekarang mendekati proporsi jarak
+     selfie WAJAR (lengan tangan normal, ~30-40cm), bukan jarak jauh. */
+  flex: none; margin: 8px auto 0;
+  width: 82%; max-width: 320px;
+  height: min(46vh, 38svh, 420px);
+  max-height: 420px; min-height: 220px;
   display: flex; align-items: center; justify-content: center;
   /* Delay kecil (0.08s) supaya animasi masuk guide mulai SETELAH transisi
      transform/scale screen (0.22s) sudah cukup jalan — mencegah dua animasi
@@ -646,6 +653,14 @@ input { font-family: inherit; }
   filter: drop-shadow(0 0 9px rgba(122,163,110,0.55));
 }
 .frame-guide.ready .fg-scanline { opacity: 0; animation: none; }
+
+/* Hint singkat di bawah oval — teks kecil, tidak mendominasi, cuma bantu
+   user paham maksud oval itu tanpa perlu menebak-nebak. */
+.frame-guide-tip {
+  text-align: center; font-size: 12px; font-weight: 500;
+  color: var(--paper-300); margin-top: 10px; padding: 0 24px;
+  line-height: 1.4;
+}
 
 .camera-bottom { display: flex; flex-direction: column; align-items: center; gap: 13px; margin-top: auto; }
 .camera-timestamp {

@@ -203,27 +203,32 @@
       </div>
 
       <div class="frame-guide" id="frame-guide">
-        <svg viewBox="0 0 240 300" xmlns="http://www.w3.org/2000/svg" class="frame-guide-svg">
+        <svg viewBox="0 0 240 300" xmlns="http://www.w3.org/2000/svg" class="frame-guide-svg" preserveAspectRatio="xMidYMid meet">
           <defs>
             <!-- Clip supaya garis scan tidak pernah bocor keluar bentuk oval -->
             <clipPath id="fg-oval-clip">
-              <ellipse cx="120" cy="150" rx="96" ry="126"/>
+              <ellipse cx="120" cy="150" rx="106" ry="134"/>
             </clipPath>
           </defs>
           <!-- Oval pemandu wajah: garis putus-putus tegas + halo, "berjalan" pelan
-               mengelilingi oval untuk kesan sistem sedang aktif memindai -->
-          <ellipse class="fg-oval" cx="120" cy="150" rx="98" ry="128"/>
+               mengelilingi oval untuk kesan sistem sedang aktif memindai.
+               rx/ry diperbesar & dirapatkan ke tepi viewBox supaya oval memenuhi
+               sebagian besar frame — merepresentasikan jarak selfie wajar
+               (lengan tangan normal), bukan jarak jauh yang bikin user harus
+               merentangkan tangan sejauh mungkin. -->
+          <ellipse class="fg-oval" cx="120" cy="150" rx="108" ry="136"/>
           <!-- Garis scan horizontal yang menyapu naik-turun di dalam oval -->
           <g clip-path="url(#fg-oval-clip)">
-            <line class="fg-scanline" x1="24" y1="150" x2="216" y2="150"/>
+            <line class="fg-scanline" x1="14" y1="150" x2="226" y2="150"/>
           </g>
           <!-- 4 corner bracket ala face-scan HR app profesional -->
-          <path class="fg-corner" d="M8 46 V16 A8 8 0 0 1 16 8 H46"/>
-          <path class="fg-corner" d="M194 8 H224 A8 8 0 0 1 232 16 V46"/>
-          <path class="fg-corner" d="M232 254 V284 A8 8 0 0 1 224 292 H194"/>
-          <path class="fg-corner" d="M46 292 H16 A8 8 0 0 1 8 284 V254"/>
+          <path class="fg-corner" d="M4 42 V12 A8 8 0 0 1 12 4 H42"/>
+          <path class="fg-corner" d="M198 4 H228 A8 8 0 0 1 236 12 V42"/>
+          <path class="fg-corner" d="M236 258 V288 A8 8 0 0 1 228 296 H198"/>
+          <path class="fg-corner" d="M42 296 H12 A8 8 0 0 1 4 288 V258"/>
         </svg>
       </div>
+      <div class="frame-guide-tip" id="frame-guide-tip">Posisikan wajah di dalam bingkai, pegang HP di depan wajah</div>
 
       <div class="camera-bottom">
         <div class="camera-timestamp" id="camera-timestamp">—</div>
