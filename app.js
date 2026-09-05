@@ -306,9 +306,10 @@ function renderTodayStatus(data) {
   const windowKeluar = document.getElementById('status-keluar-window');
 
   if (data.masuk) {
+    const t = safeTimeText(data.masuk.time);
     cardMasuk.classList.add('filled');
-    document.getElementById('status-masuk-time').textContent = data.masuk.time;
-    windowMasuk.textContent = `Tercatat ${data.masuk.time} WIB`;
+    document.getElementById('status-masuk-time').textContent = t;
+    windowMasuk.textContent = `Tercatat ${t} WIB`;
     windowMasuk.title = data.masuk.address || '';
   } else {
     cardMasuk.classList.remove('filled');
@@ -318,9 +319,10 @@ function renderTodayStatus(data) {
   }
 
   if (data.keluar) {
+    const t = safeTimeText(data.keluar.time);
     cardKeluar.classList.add('filled');
-    document.getElementById('status-keluar-time').textContent = data.keluar.time;
-    windowKeluar.textContent = `Tercatat ${data.keluar.time} WIB`;
+    document.getElementById('status-keluar-time').textContent = t;
+    windowKeluar.textContent = `Tercatat ${t} WIB`;
     windowKeluar.title = data.keluar.address || '';
   } else {
     cardKeluar.classList.remove('filled');
@@ -868,7 +870,7 @@ function showSuccess(data) {
   document.getElementById('success-title').textContent =
     type === 'masuk' ? 'Absensi masuk berhasil' : 'Absensi keluar berhasil';
   document.getElementById('success-sub').textContent =
-    `${data.data.time} WIB · ${data.data.address}`;
+    `${safeTimeText(data.data.time)} WIB · ${data.data.address}`;
   showScreen('screen-success');
 }
 
@@ -940,7 +942,7 @@ function renderRecentRow(kind, label, entry) {
   const icon = kind === 'in'
     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'
     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const time = entry ? entry.time : '—';
+  const time = entry ? safeTimeText(entry.time) : '—';
   return `
     <div class="recent-row">
       <span class="recent-row-icon ${kind}">${icon}</span>
@@ -951,10 +953,40 @@ function renderRecentRow(kind, label, entry) {
 }
 
 function formatFullHistoryDate(dateStr) {
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
-  } catch (e) { return dateStr; }
+  const d = parseDateSafe(dateStr);
+  if (!d) return dateStr || '—';
+  return d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
+}
+
+// Backend seharusnya selalu kirim jam sebagai string "HH:mm:ss" murni.
+// Fungsi ini jaga-jaga kalau ada baris data LAMA di sheet yang sempat
+// tersimpan sebelum backend diperbaiki (masih berbentuk timestamp aneh
+// gaya "1899-12-30T03:45:36.000Z") — supaya tetap tampil sebagai jam,
+// bukan raw ISO string yang membingungkan.
+function safeTimeText(value) {
+  if (!value) return '—';
+  const str = String(value).trim();
+  // Sudah format jam bersih (HH:mm atau HH:mm:ss) -> tampilkan langsung
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(str)) return str;
+  // Timestamp ISO (termasuk epoch 1899-12-30 dari Google Sheets) -> ambil jamnya saja
+  const d = new Date(str);
+  if (!isNaN(d)) {
+    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: TZ });
+  }
+  return str;
+}
+
+function parseDateSafe(dateStr) {
+  if (!dateStr) return null;
+  const str = String(dateStr).trim();
+  // Format "yyyy-MM-dd" murni -> parse manual biar tidak kena pergeseran timezone
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
 }
 
 /* ============================================
@@ -1017,7 +1049,7 @@ function renderHistory(list) {
         </div>
         <div class="history-addr">${escapeHtml(item.address || '')}</div>
       </div>
-      <div class="history-time">${item.time}</div>
+      <div class="history-time">${safeTimeText(item.time)}</div>
     `;
     div.addEventListener('click', () => window.open(item.mapsLink, '_blank'));
     frag.appendChild(div);
@@ -1026,10 +1058,9 @@ function renderHistory(list) {
 }
 
 function formatHistoryDate(dateStr) {
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: TZ });
-  } catch (e) { return dateStr; }
+  const d = parseDateSafe(dateStr);
+  if (!d) return dateStr || '—';
+  return d.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ });
 }
 
 /* ============================================

@@ -61,6 +61,37 @@ function jsonOut(obj) {
 }
 
 /* ============================================
+   NORMALISASI TANGGAL/JAM DARI SHEET
+   ------------------------------------------------
+   Kenapa perlu ini: kalau kolom "Jam" atau "Tanggal" di Google Sheet
+   ke-format sebagai tipe Time/Date (baik manual oleh user, atau otomatis
+   oleh Sheets saat appendRow menulis string "HH:mm:ss"/"yyyy-MM-dd"),
+   maka sheet.getValues() akan mengembalikan objek Date JS asli, BUKAN
+   string. Objek Date "pure time" dari Sheets punya tanggal dasar
+   1899-12-30 (epoch khusus Lotus/Sheets). Kalau ini lolos ke JSON.stringify
+   tanpa diformat ulang, frontend akan menerima "1899-12-30T03:45:36.000Z"
+   alih-alih "10:45:36" — persis bug yang bikin Riwayat Presensi berantakan.
+   Fungsi di bawah ini memastikan APAPUN bentuk datanya (string bersih,
+   Date object, atau angka serial Sheets), yang dikirim ke frontend SELALU
+   string yang sudah diformat rapi di timezone Asia/Jakarta.
+   ============================================ */
+function normalizeTime(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value)) {
+    return Utilities.formatDate(value, TZ, 'HH:mm:ss');
+  }
+  return String(value);
+}
+
+function normalizeDate(value) {
+  if (value === '' || value === null || value === undefined) return '';
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value)) {
+    return Utilities.formatDate(value, TZ, 'yyyy-MM-dd');
+  }
+  return String(value);
+}
+
+/* ============================================
    EMPLOYEES (dengan cache singkat biar endpoint ini instan)
    ============================================ */
 function getEmployeesCached() {
@@ -195,7 +226,9 @@ function getTodayStatus(employeeId) {
   // Scan dari bawah (data terbaru) supaya kalau ada duplikat lama, yang dipakai
   // tetap entri paling akhir/terbaru.
   for (let i = rows.length - 1; i >= 0; i--) {
-    const [id, name, tipe, tanggal, jam, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
+    const [id, name, tipe, tanggalRaw, jamRaw, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
+    const tanggal = normalizeDate(tanggalRaw);
+    const jam = normalizeTime(jamRaw);
     if (String(id) !== String(employeeId)) continue;
     if (tanggal !== today) continue;
 
@@ -221,12 +254,12 @@ function getHistory(employeeId, limit) {
   const out = [];
 
   for (let i = rows.length - 1; i >= 0; i--) {
-    const [id, name, tipe, tanggal, jam, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
+    const [id, name, tipe, tanggalRaw, jamRaw, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
     if (String(id) !== String(employeeId)) continue;
     out.push({
       type: tipe,
-      date: tanggal,
-      time: jam,
+      date: normalizeDate(tanggalRaw),
+      time: normalizeTime(jamRaw),
       address: alamat,
       photoUrl: fotoUrl,
       mapsLink: mapsLink
