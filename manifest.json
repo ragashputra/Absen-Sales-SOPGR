@@ -1,13 +1,13 @@
 {
-  "name": "Absen — PT Capella Dinamik Nusantara",
-  "short_name": "Absen",
+  "name": "Absensi — PT Capella Dinamik Nusantara",
+  "short_name": "Absensi",
   "description": "Absensi selfie dengan lokasi akurat untuk sales freelance CDN",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#12140F",
-  "theme_color": "#12140F",
+  "background_color": "#0A0B0D",
+  "theme_color": "#0A0B0D",
   "lang": "id",
   "icons": [
     {

@@ -5,7 +5,7 @@
 // daftar nama — jadi app tetap bisa dipakai penuh walau backend belum siap.
 const CONFIG = {
   APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwCMdNnq60rkzt0Fz2UbR3xUXFndKpm6gDVv1uifkyMfoG9E4Mc0Z6ZIwgj1jRrvmepIA/exec',
-  APP_NAME: 'Absen',
+  APP_NAME: 'Absensi',
   COMPANY_NAME: 'PT Capella Dinamik Nusantara',
   TIMEZONE: 'Asia/Jakarta', // WIB — dipakai untuk semua tampilan jam/tanggal di app
 

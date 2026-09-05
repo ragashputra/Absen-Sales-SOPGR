@@ -29,7 +29,7 @@
 
 const SHEET_KARYAWAN = 'Karyawan';
 const SHEET_LOG = 'Log';
-const FOLDER_NAME = 'Absen - Foto Selfie'; // folder Drive otomatis dibuat di My Drive
+const FOLDER_NAME = 'Absensi - Foto Selfie'; // folder Drive otomatis dibuat di My Drive
 const TZ = 'Asia/Jakarta';
 const EMPLOYEE_CACHE_SECONDS = 360;
 
@@ -97,7 +97,7 @@ function recordAttendance(payload) {
   // Validasi cepat dulu — gagal di sini jauh lebih murah daripada gagal
   // setelah upload foto ke Drive.
   if (!type || (type !== 'masuk' && type !== 'keluar')) {
-    return { ok: false, error: 'Tipe absen tidak valid' };
+    return { ok: false, error: 'Tipe absensi tidak valid' };
   }
   if (!employeeId || !employeeName) {
     return { ok: false, error: 'Data karyawan tidak lengkap' };
@@ -123,7 +123,7 @@ function recordAttendance(payload) {
     const typeKey = type === 'masuk' ? 'masuk' : 'keluar';
     const existing = getTodayStatus(employeeId);
     if (existing[typeKey]) {
-      return { ok: false, error: `Sudah absen ${typeKey} hari ini` };
+      return { ok: false, error: `Sudah absensi ${typeKey} hari ini` };
     }
 
     // Simpan foto ke Drive

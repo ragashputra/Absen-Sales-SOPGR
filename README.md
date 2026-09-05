@@ -1,4 +1,4 @@
-# Absen — PWA Absensi Selfie + GPS untuk Sales Freelance
+# Absensi — PWA Absensi Selfie + GPS untuk Sales Freelance
 
 Aplikasi absensi berbasis PWA (installable di HP, tanpa perlu App Store) dengan foto selfie
 dan lokasi GPS akurat (auto reverse-geocode ke alamat + link Google Maps), untuk absen masuk
@@ -105,7 +105,7 @@ hosting di atas otomatis HTTPS.
 | Yang mau diubah | Dimana |
 |---|---|
 | Nama perusahaan, ambang akurasi GPS | `config.js` |
-| Warna, font, ukuran tombol | `style.css` bagian `:root` (design tokens di paling atas) |
+| Warna, font, ukuran tombol | `style.css` bagian `:root` (design tokens di paling atas — tema graphite + brass) |
 | Logo/icon app | Ganti file di `icons/` (ukuran sama: 192x192 & 512x512) |
 | Radius toleransi lokasi kantor tertentu (geofence) | Belum ada — bisa ditambahkan kalau perlu |
 

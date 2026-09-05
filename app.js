@@ -77,11 +77,11 @@ function attachEventListeners() {
 
 function attachConnectivityListeners() {
   window.addEventListener('online', () => {
-    showToast('Koneksi kembali — mencoba kirim absen tertunda…');
+    showToast('Koneksi kembali — mencoba kirim absensi tertunda…');
     flushPendingQueue();
   });
   window.addEventListener('offline', () => {
-    showToast('Kamu sedang offline. Absen akan dikirim otomatis saat online.', true);
+    showToast('Kamu sedang offline. Absensi akan dikirim otomatis saat online.', true);
   });
   // Coba flush setiap kali app dibuka kembali (misal dari background)
   document.addEventListener('visibilitychange', () => {
@@ -270,7 +270,7 @@ function renderTodayStatus(data) {
    ============================================ */
 async function openCamera(type) {
   state.currentType = type;
-  document.getElementById('camera-mode-chip').textContent = type === 'masuk' ? 'ABSEN MASUK' : 'ABSEN KELUAR';
+  document.getElementById('camera-mode-chip').textContent = type === 'masuk' ? 'ABSENSI MASUK' : 'ABSENSI KELUAR';
   showScreen('screen-camera');
   resetGpsPanel();
   startGpsWatch();
@@ -616,7 +616,7 @@ function showPreview() {
 
 function retakePhoto() {
   showScreen('screen-camera');
-  document.getElementById('camera-mode-chip').textContent = state.currentType === 'masuk' ? 'ABSEN MASUK' : 'ABSEN KELUAR';
+  document.getElementById('camera-mode-chip').textContent = state.currentType === 'masuk' ? 'ABSENSI MASUK' : 'ABSENSI KELUAR';
   resetGpsPanel();
   startGpsWatch();
   startCameraStream();
@@ -638,7 +638,7 @@ async function submitAttendance() {
     showModal({
       icon: 'warn',
       title: 'Backend belum terhubung',
-      message: 'URL Apps Script di config.js belum diisi, jadi absen belum bisa dikirim ke Google Sheets. Ikuti panduan di README.md untuk menghubungkannya.',
+      message: 'URL Apps Script di config.js belum diisi, jadi absensi belum bisa dikirim ke Google Sheets. Ikuti panduan di README.md untuk menghubungkannya.',
       actions: [{ label: 'Oke', style: 'solid' }]
     });
     return;
@@ -674,7 +674,7 @@ async function submitAttendance() {
       // sebelum respons balik) — anggap ini bukan kegagalan, langsung refresh status.
       showModal({
         icon: 'warn',
-        title: 'Absen sudah tercatat',
+        title: 'Absensi sudah tercatat',
         message: data.error,
         actions: [{ label: 'Oke', style: 'solid', onClick: () => { showScreen('screen-home'); refreshTodayStatus(); } }]
       });
@@ -706,7 +706,7 @@ function setSubmitLoading(isLoading) {
   const btnText = document.getElementById('btn-submit-text');
   const spinner = document.getElementById('btn-submit-spinner');
   btn.disabled = isLoading;
-  btnText.textContent = isLoading ? 'Mengirim…' : 'Kirim Absen';
+  btnText.textContent = isLoading ? 'Mengirim…' : 'Kirim Absensi';
   spinner.classList.toggle('hidden', !isLoading);
 }
 
@@ -779,7 +779,7 @@ async function flushPendingQueue() {
   flushInProgress = false;
 
   if (sentCount > 0) {
-    showToast(`${sentCount} absen tertunda berhasil dikirim.`);
+    showToast(`${sentCount} absensi tertunda berhasil dikirim.`);
     if (document.getElementById('screen-home').classList.contains('active')) {
       refreshTodayStatus();
     }
@@ -789,7 +789,7 @@ async function flushPendingQueue() {
 function showQueuedSuccess() {
   const type = state.currentType;
   document.getElementById('success-title').textContent =
-    type === 'masuk' ? 'Absen masuk tersimpan' : 'Absen keluar tersimpan';
+    type === 'masuk' ? 'Absensi masuk tersimpan' : 'Absensi keluar tersimpan';
   document.getElementById('success-sub').textContent =
     'Kamu sedang offline — foto & lokasi sudah diamankan dan akan terkirim otomatis begitu koneksi kembali.';
   showScreen('screen-success');
@@ -798,7 +798,7 @@ function showQueuedSuccess() {
 function showSuccess(data) {
   const type = state.currentType;
   document.getElementById('success-title').textContent =
-    type === 'masuk' ? 'Absen masuk berhasil' : 'Absen keluar berhasil';
+    type === 'masuk' ? 'Absensi masuk berhasil' : 'Absensi keluar berhasil';
   document.getElementById('success-sub').textContent =
     `${data.data.time} WIB · ${data.data.address}`;
   showScreen('screen-success');
