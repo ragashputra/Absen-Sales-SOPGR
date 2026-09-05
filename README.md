@@ -69,12 +69,37 @@ hosting di atas otomatis HTTPS.
 - Menggunakan `navigator.geolocation.watchPosition` dengan `enableHighAccuracy: true`.
 - Panel GPS di layar kamera menunjukkan status real-time: mencari sinyal → akurasi (meter) →
   "Lokasi terkunci" saat akurasi ≤ 100m (bisa diubah di `config.js` → `GPS_ACCURACY_THRESHOLD`).
-- Begitu lokasi didapat, otomatis reverse-geocode (via OpenStreetMap Nominatim, gratis tanpa API
-  key) jadi alamat yang mudah dibaca, bukan cuma koordinat.
+  Kalau setelah 12 detik akurasi masih rendah (misal di dalam gedung), tombol foto tetap
+  diaktifkan supaya karyawan tidak stuck — lebih baik absen dengan akurasi menengah daripada
+  tidak bisa absen sama sekali.
+- Reverse-geocode (ubah koordinat jadi nama jalan) dibuat berlapis dan cepat, tanpa API key:
+  1. **Cache lokal** — lokasi yang pernah dikunjungi (radius ±11m) langsung tampil instan dari
+     HP, tanpa nunggu jaringan sama sekali.
+  2. **Nominatim (OpenStreetMap)** — provider utama, detail nama jalan paling baik untuk
+     Indonesia, dengan timeout ketat 5 detik.
+  3. **BigDataCloud** — backup otomatis kalau Nominatim lambat/limit, tanpa API key juga.
+  4. Kalau kedua provider gagal, koordinat GPS mentah tetap ditampilkan — **absen tidak pernah
+     terblokir** hanya karena nama jalan gagal dimuat.
+  Proses geocoding dipicu di titik GPS **pertama** yang masuk (bukan menunggu status
+  "terkunci"), lalu diperbarui lagi kalau akurasi membaik signifikan — inilah yang membuat
+  alamat tidak lagi terasa lama muncul.
 - Foto, koordinat, akurasi, alamat, dan waktu capture semuanya dikunci bersamaan saat user
   menekan tombol shutter — tidak bisa foto duluan lalu ambil lokasi belakangan.
 - Setiap absen otomatis dapat link Google Maps langsung ke titik itu (bisa dibuka admin dari
   Sheet atau dari halaman Riwayat di app).
+
+## Kenapa upload absen sekarang jauh lebih cepat
+- Foto dikompres ke maksimum 720px dengan kualitas JPEG 72% (bisa diubah di `config.js` →
+  `PHOTO_MAX_DIMENSION` / `PHOTO_QUALITY`) — cukup jelas untuk verifikasi wajah, tapi ukuran
+  file jauh lebih kecil (±60-120KB) sehingga proses kirim ke Apps Script + Drive jadi jauh
+  lebih ringan, terutama di jaringan seluler yang lemah.
+- Backend (`Code.gs`) memakai `LockService` supaya tidak ada proses tabrakan, dan cache
+  singkat untuk daftar karyawan supaya layar login selalu terasa instan.
+- **Antrian offline**: kalau saat submit ternyata tidak ada koneksi (atau koneksi terputus di
+  tengah jalan), absen (foto + lokasi) **tidak hilang** — otomatis disimpan di HP dan dikirim
+  ulang otomatis begitu koneksi kembali, baik saat app dibuka lagi maupun saat event "online"
+  terdeteksi browser.
+- Percobaan kirim otomatis diulang (retry) sampai 2x sebelum dianggap gagal karena jaringan.
 
 ## Kustomisasi cepat
 | Yang mau diubah | Dimana |

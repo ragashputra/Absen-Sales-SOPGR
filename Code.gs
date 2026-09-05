@@ -16,16 +16,27 @@
  *      - Who has access: Anyone
  * 7. Copy "Web app URL" hasil deploy, paste ke config.js → APPS_SCRIPT_URL
  * 8. Setiap kali edit script, deploy ulang lewat Deploy → Manage deployments → Edit → New version.
+ *
+ * ---- Kenapa versi ini lebih cepat & stabil dari versi awal ----
+ * - LockService mencegah dua absen nyaris bersamaan saling tabrak/duplikat.
+ * - Cache karyawan (6 menit) di CacheService supaya endpoint "employees" tidak
+ *   selalu baca ulang seluruh sheet Karyawan.
+ * - Validasi payload lebih ketat sebelum proses foto (gagal cepat, tidak buang
+ *   waktu upload ke Drive kalau data jelas tidak lengkap).
+ * - Semua error dibungkus rapi jadi respons JSON yang konsisten, supaya app
+ *   frontend selalu tahu persis kenapa gagal (bukan cuma "error" generik).
  */
 
 const SHEET_KARYAWAN = 'Karyawan';
 const SHEET_LOG = 'Log';
 const FOLDER_NAME = 'Absen - Foto Selfie'; // folder Drive otomatis dibuat di My Drive
+const TZ = 'Asia/Jakarta';
+const EMPLOYEE_CACHE_SECONDS = 360;
 
 function doGet(e) {
   const action = e.parameter.action;
   try {
-    if (action === 'employees') return jsonOut({ employees: getEmployees() });
+    if (action === 'employees') return jsonOut({ employees: getEmployeesCached() });
     if (action === 'today') return jsonOut(getTodayStatus(e.parameter.employeeId));
     if (action === 'history') return jsonOut({ history: getHistory(e.parameter.employeeId, Number(e.parameter.limit) || 50) });
     return jsonOut({ error: 'Unknown action' });
@@ -50,8 +61,20 @@ function jsonOut(obj) {
 }
 
 /* ============================================
-   EMPLOYEES
+   EMPLOYEES (dengan cache singkat biar endpoint ini instan)
    ============================================ */
+function getEmployeesCached() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get('employees_v1');
+  if (cached) return JSON.parse(cached);
+
+  const employees = getEmployees();
+  try {
+    cache.put('employees_v1', JSON.stringify(employees), EMPLOYEE_CACHE_SECONDS);
+  } catch (e) { /* payload terlalu besar utk cache, abaikan */ }
+  return employees;
+}
+
 function getEmployees() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_KARYAWAN);
   if (!sheet) return [];
@@ -71,59 +94,82 @@ function getEmployees() {
 function recordAttendance(payload) {
   const { type, employeeId, employeeName, photoBase64, latitude, longitude, accuracy, address } = payload;
 
-  if (!type || !employeeId || !photoBase64 || latitude == null || longitude == null) {
-    return { ok: false, error: 'Data tidak lengkap' };
+  // Validasi cepat dulu — gagal di sini jauh lebih murah daripada gagal
+  // setelah upload foto ke Drive.
+  if (!type || (type !== 'masuk' && type !== 'keluar')) {
+    return { ok: false, error: 'Tipe absen tidak valid' };
+  }
+  if (!employeeId || !employeeName) {
+    return { ok: false, error: 'Data karyawan tidak lengkap' };
+  }
+  if (!photoBase64 || photoBase64.length < 100) {
+    return { ok: false, error: 'Foto tidak valid atau kosong' };
+  }
+  if (latitude == null || longitude == null || isNaN(latitude) || isNaN(longitude)) {
+    return { ok: false, error: 'Lokasi GPS tidak valid' };
   }
 
-  // Cegah double-absen tipe yang sama di hari yang sama
-  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const existing = getTodayStatus(employeeId);
-  const typeKey = type === 'masuk' ? 'masuk' : 'keluar';
-  if (existing[typeKey]) {
-    return { ok: false, error: `Sudah absen ${typeKey} hari ini` };
+  // Lock supaya dua request nyaris bersamaan (misal double-tap tombol kirim,
+  // atau retry otomatis dari app yang tumpang-tindih) tidak menghasilkan
+  // baris log ganda untuk absen tipe yang sama di hari yang sama.
+  const lock = LockService.getScriptLock();
+  const gotLock = lock.tryLock(10000);
+  if (!gotLock) {
+    return { ok: false, error: 'Sistem sedang sibuk, coba lagi sebentar' };
   }
 
-  // Simpan foto ke Drive
-  const folder = getOrCreateFolder();
-  const now = new Date();
-  const timeStr = Utilities.formatDate(now, Session.getScriptTimeZone(), 'HH:mm:ss');
-  const fileName = `${today}_${timeStr}_${type}_${employeeName}.jpg`.replace(/[\/\\?%*:|"<>]/g, '-');
+  try {
+    const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+    const typeKey = type === 'masuk' ? 'masuk' : 'keluar';
+    const existing = getTodayStatus(employeeId);
+    if (existing[typeKey]) {
+      return { ok: false, error: `Sudah absen ${typeKey} hari ini` };
+    }
 
-  const base64Data = photoBase64.split(',')[1] || photoBase64;
-  const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), 'image/jpeg', fileName);
-  const file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    // Simpan foto ke Drive
+    const folder = getOrCreateFolder();
+    const now = new Date();
+    const timeStr = Utilities.formatDate(now, TZ, 'HH:mm:ss');
+    const safeName = String(employeeName).replace(/[\/\\?%*:|"<>]/g, '-');
+    const fileName = `${today}_${timeStr}_${type}_${safeName}.jpg`;
 
-  const photoUrl = `https://drive.google.com/uc?export=view&id=${file.getId()}`;
-  const mapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    const base64Data = photoBase64.indexOf(',') !== -1 ? photoBase64.split(',')[1] : photoBase64;
+    const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), 'image/jpeg', fileName);
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  // Tulis ke sheet Log
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
-  sheet.appendRow([
-    employeeId,
-    employeeName,
-    type === 'masuk' ? 'Masuk' : 'Keluar',
-    today,
-    timeStr,
-    latitude,
-    longitude,
-    accuracy || '',
-    address || '',
-    photoUrl,
-    mapsLink
-  ]);
+    const photoUrl = `https://drive.google.com/uc?export=view&id=${file.getId()}`;
+    const mapsLink = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-  return {
-    ok: true,
-    data: {
-      type: typeKey,
-      time: timeStr,
-      date: today,
-      address: address || `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
+    sheet.appendRow([
+      employeeId,
+      employeeName,
+      type === 'masuk' ? 'Masuk' : 'Keluar',
+      today,
+      timeStr,
+      latitude,
+      longitude,
+      accuracy || '',
+      address || '',
       photoUrl,
       mapsLink
-    }
-  };
+    ]);
+
+    return {
+      ok: true,
+      data: {
+        type: typeKey,
+        time: timeStr,
+        date: today,
+        address: address || `${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)}`,
+        photoUrl,
+        mapsLink
+      }
+    };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function getOrCreateFolder() {
@@ -139,18 +185,24 @@ function getTodayStatus(employeeId) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
   if (!sheet) return { masuk: null, keluar: null };
 
-  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  const rows = sheet.getDataRange().getValues();
+  const today = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { masuk: null, keluar: null };
+
+  const rows = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
   const result = { masuk: null, keluar: null };
 
-  for (let i = 1; i < rows.length; i++) {
+  // Scan dari bawah (data terbaru) supaya kalau ada duplikat lama, yang dipakai
+  // tetap entri paling akhir/terbaru.
+  for (let i = rows.length - 1; i >= 0; i--) {
     const [id, name, tipe, tanggal, jam, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
     if (String(id) !== String(employeeId)) continue;
     if (tanggal !== today) continue;
 
     const entry = { time: jam, address: alamat, photoUrl: fotoUrl, mapsLink };
-    if (tipe === 'Masuk') result.masuk = entry;
-    if (tipe === 'Keluar') result.keluar = entry;
+    if (tipe === 'Masuk' && !result.masuk) result.masuk = entry;
+    if (tipe === 'Keluar' && !result.keluar) result.keluar = entry;
+    if (result.masuk && result.keluar) break;
   }
   return result;
 }
@@ -162,10 +214,13 @@ function getHistory(employeeId, limit) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
   if (!sheet) return [];
 
-  const rows = sheet.getDataRange().getValues();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const rows = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
   const out = [];
 
-  for (let i = rows.length - 1; i >= 1; i--) {
+  for (let i = rows.length - 1; i >= 0; i--) {
     const [id, name, tipe, tanggal, jam, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
     if (String(id) !== String(employeeId)) continue;
     out.push({

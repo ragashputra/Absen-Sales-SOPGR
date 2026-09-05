@@ -2,7 +2,7 @@
 
 // Naikkan versi ini setiap kali file di-update & di-redeploy, supaya cache lama
 // otomatis dibuang dan semua HP karyawan langsung dapat versi terbaru.
-const CACHE_NAME = 'absen-v3';
+const CACHE_NAME = 'absen-v4';
 
 // File yang JARANG berubah (aman di-cache-first, biar buka instan & tetap
 // bisa dipakai offline).
@@ -30,6 +30,17 @@ function isNetworkFirst(url) {
   return NETWORK_FIRST_PATHS.some((p) => url.endsWith(p)) || url.endsWith('/');
 }
 
+// Domain yang TIDAK BOLEH pernah diintercept/di-cache oleh service worker:
+// backend Apps Script (harus selalu fresh), Drive (foto), dan kedua provider
+// reverse-geocoding (lokasi harus selalu real-time, bukan basi dari cache).
+const NEVER_INTERCEPT_HOSTS = [
+  'script.google.com',
+  'script.googleusercontent.com',
+  'drive.google.com',
+  'nominatim.openstreetmap.org',
+  'api.bigdatacloud.net'
+];
+
 // Install: cache aset statis saja
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -48,7 +59,7 @@ self.addEventListener('activate', (event) => {
 });
 
 // Fetch strategy:
-// - Apps Script, Nominatim, Drive, non-GET -> selalu langsung ke network, jangan diintercept.
+// - Apps Script, Nominatim, BigDataCloud, Drive, non-GET -> selalu langsung ke network, jangan diintercept.
 // - File kode (html/js/css) -> NETWORK-FIRST: coba network dulu (biar selalu versi terbaru),
 //   fallback ke cache cuma kalau offline.
 // - Aset statis (manifest, icon) -> cache-first, biar buka instan.
@@ -56,10 +67,7 @@ self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
   if (
-    url.includes('script.google.com') ||
-    url.includes('script.googleusercontent.com') ||
-    url.includes('nominatim.openstreetmap.org') ||
-    url.includes('drive.google.com') ||
+    NEVER_INTERCEPT_HOSTS.some((host) => url.includes(host)) ||
     event.request.method !== 'GET'
   ) {
     return; // biarkan browser handle langsung ke network
