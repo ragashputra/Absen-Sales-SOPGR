@@ -490,7 +490,13 @@ input { font-family: inherit; }
 .sheet-option-text { display: flex; flex-direction: column; gap: 2px; }
 .sheet-option-title { font-size: 14.5px; font-weight: 700; color: var(--text-primary); }
 .sheet-option-sub { font-size: 12px; color: var(--text-tertiary); }
-.sheet-option:disabled { opacity: 0.45; pointer-events: none; }
+/* transition: none di sini SENGAJA — opacity disabled harus muncul LANGSUNG
+   (instan) begitu attribute [disabled] di-set oleh JS, sebelum sheet mulai
+   terlihat/animasi masuk. Tanpa ini, opacity ikut ke-inherit durasi transisi
+   lain (mis. dari aturan global .sheet-option di atas / theme-transition)
+   sehingga sempat kelihatan "abu-abu sesaat lalu normal" saat sheet baru
+   dibuka — padahal status disabled-nya sendiri sudah benar sejak awal. */
+.sheet-option:disabled { opacity: 0.45; pointer-events: none; transition: none; }
 .sheet-cancel {
   width: 100%; padding: 14px; margin-top: 4px;
   border-radius: var(--radius-md); background: var(--ink-900); color: var(--paper-100);
@@ -541,10 +547,25 @@ input { font-family: inherit; }
 .gps-address { font-size: 12px; color: var(--paper-200); margin-top: 5px; line-height: 1.4; }
 
 .frame-guide {
-  flex: 1; margin: 20px 30px;
+  /* Ukuran TETAP (bukan flex:1) supaya bentuknya tidak pernah ikut kereog
+     ulang / "patah" saat elemen di atas-bawahnya berubah tinggi (mis. teks
+     gps-address bertambah baris begitu alamat GPS masuk). Diposisikan lewat
+     margin auto di flex container vertikal, jadi tetap center tanpa
+     numpang ke flex-grow yang dipengaruhi konten sekitarnya. */
+  flex: none; margin: 20px auto;
   border: 1.5px dashed rgba(232,206,148,0.32);
   border-radius: 50% / 42%;
-  max-width: 260px; align-self: center; width: 68%;
+  width: 68%; max-width: 260px; height: 34vh; max-height: 320px; min-height: 200px;
+  /* Delay kecil (0.08s) supaya animasi masuk guide mulai SETELAH transisi
+     transform/scale screen (0.22s) sudah cukup jalan — mencegah dua animasi
+     numpuk bersamaan yang kelihatan "patah"/tersendat saat kamera baru
+     dibuka. will-change biar browser siapkan layer sendiri dari awal. */
+  will-change: transform, opacity;
+  opacity: 0; transform: scale(0.94);
+  animation: frame-guide-in 0.45s var(--ease-spring) 0.08s forwards;
+}
+@keyframes frame-guide-in {
+  to { opacity: 1; transform: scale(1); }
 }
 
 .camera-bottom { display: flex; flex-direction: column; align-items: center; gap: 13px; margin-top: auto; }
