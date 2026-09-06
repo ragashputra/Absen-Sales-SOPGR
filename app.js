@@ -2639,14 +2639,40 @@ function renderHistory(list) {
     // Fallback berlapis kalau foto gagal dimuat (link lama format "uc?export=view",
     // foto dihapus manual dari Drive, atau lagi offline): jangan biarkan ikon
     // broken-image jelek nongol — ganti jadi ikon kamera netral yang tetap rapi.
+    let thumbBroken = false;
     img.addEventListener('error', () => {
+      thumbBroken = true;
       img.classList.add('history-thumb-fallback');
       img.removeAttribute('src');
     }, { once: true });
+    // Tap FOTO SAJA -> preview fullscreen (pakai resolusi lebih besar,
+    // bukan thumbnail w400 yang buram kalau di-zoom). stopPropagation wajib
+    // supaya tidak ikut men-trigger klik baris (yang membuka Google Maps) —
+    // dua aksi berbeda pada satu baris, sama seperti pola avatar di list
+    // pilih nama. Kalau thumbnail gagal dimuat (fallback ikon kamera),
+    // preview tidak dibuka karena memang tidak ada foto valid untuk dilihat.
+    img.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (thumbBroken) return;
+      openPhotoLightbox(toFullPhotoUrl(item.photoUrl), `${item.type} • ${formatHistoryDate(item.date)} ${safeTimeText(item.time)}`);
+    });
     div.addEventListener('click', () => window.open(item.mapsLink, '_blank'));
     frag.appendChild(div);
   });
   container.appendChild(frag);
+}
+
+// Versi resolusi lebih besar dari toThumbnailUrl, khusus dipakai saat foto
+// dibuka di lightbox (preview fullscreen) supaya tidak pecah/buram —
+// thumbnail list sengaja kecil (w400) demi performa scroll, tapi preview
+// butuh detail lebih tinggi.
+function toFullPhotoUrl(url) {
+  if (!url) return '';
+  const match = String(url).match(/[?&]id=([a-zA-Z0-9_-]+)/) || String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) {
+    return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w1600`;
+  }
+  return url;
 }
 
 // Menormalkan URL foto Drive lama ("uc?export=view", link "open?id=", dsb.) ke

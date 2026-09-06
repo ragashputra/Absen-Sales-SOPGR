@@ -1221,7 +1221,16 @@ input { font-family: inherit; }
   100% { background-position: -100% 0; }
 }
 
-.history-thumb { width: 52px; height: 52px; border-radius: var(--radius-sm); object-fit: cover; flex-shrink: 0; background: var(--surface-strong); }
+.history-thumb {
+  width: 52px; height: 52px; border-radius: var(--radius-sm); object-fit: cover; flex-shrink: 0;
+  background: var(--surface-strong);
+  cursor: pointer;
+  transition: transform 0.15s var(--ease-spring), filter 0.15s ease;
+}
+.history-thumb:not(.history-thumb-fallback):active { transform: scale(0.9); filter: brightness(0.92); }
+/* Foto fallback (gagal dimuat) tidak dianggap "tappable" — batalkan cursor
+   pointer & efek tekan karena tidak ada foto valid untuk di-preview. */
+.history-thumb-fallback { cursor: default; }
 /* Fallback rapi kalau foto selfie gagal dimuat — kotak netral + ikon kamera,
    bukan ikon broken-image bawaan browser yang keliatan jelek. */
 .history-thumb-fallback {
