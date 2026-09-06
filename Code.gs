@@ -5,9 +5,11 @@
  * Cara pasang:
  * 1. Buka https://sheet.new  → buat Google Sheet baru, kasih nama "Absen DB".
  * 2. Di sheet itu, buat 2 tab (sheet) dengan nama PERSIS:
- *      - "Karyawan"  → kolom: ID | Nama | Cabang
+ *      - "Karyawan"  → kolom: ID | Nama | Cabang | FotoProfilURL
  *      - "Log"       → kolom: ID | Nama | Tipe | Tanggal | Jam | Lat | Lng | Akurasi | Alamat | FotoURL | MapsLink
- *    (Baris pertama = header, boleh diisi manual atau biarkan kosong, script akan tetap nulis dari baris ke-2)
+ *    (Baris pertama = header, boleh diisi manual atau biarkan kosong, script akan tetap nulis dari baris ke-2.
+ *    Kolom "FotoProfilURL" akan diisi OTOMATIS oleh script begitu karyawan
+ *    mengambil foto profil dari app — tidak perlu diisi manual.)
  * 3. Isi tab "Karyawan" dengan daftar nama sales freelance kamu.
  * 4. Buka menu Extensions → Apps Script di Google Sheet ini.
  * 5. Hapus isi default, paste seluruh isi file ini.
@@ -36,11 +38,17 @@
  *   (tombol "Tambah Nama Baru" di layar pilih nama) tanpa perlu buka Google
  *   Sheet manual. ID baru dibuat otomatis, nama duplikat tidak akan membuat
  *   baris ganda, dan aman dipanggil dua kali beruntun (idempotent by name).
+ * - Endpoint "saveProfilePhoto": foto profil verifikasi identitas disimpan
+ *   ke Drive + kolom "FotoProfilURL" di sheet Karyawan (BUKAN cuma di
+ *   localStorage HP), supaya begitu karyawan buka app di HP/browser lain,
+ *   foto profilnya SUDAH ADA dan tidak diminta ambil ulang. Foto lama
+ *   (kalau ganti foto) otomatis dihapus dari Drive supaya tidak menumpuk.
  */
 
 const SHEET_KARYAWAN = 'Karyawan';
 const SHEET_LOG = 'Log';
 const FOLDER_NAME = 'Absensi - Foto Selfie'; // folder Drive otomatis dibuat di My Drive
+const PROFILE_FOLDER_NAME = 'Absensi - Foto Profil'; // folder terpisah khusus foto profil (identitas), biar tidak campur dgn foto selfie absen harian
 const TZ = 'Asia/Jakarta';
 const EMPLOYEE_CACHE_SECONDS = 360;
 const LOG_CACHE_SECONDS = 120; // 2 menit — cukup singkat agar tetap akurat, cukup lama utk hindari baca sheet berulang
@@ -73,6 +81,7 @@ function doPost(e) {
     const payload = JSON.parse(e.postData.contents);
     const action = payload.action;
     if (action === 'addEmployee') return jsonOut(addEmployee(payload.name, payload.branch));
+    if (action === 'saveProfilePhoto') return jsonOut(saveProfilePhoto(payload.employeeId, payload.photoBase64));
     const result = recordAttendance(payload);
     return jsonOut(result);
   } catch (err) {
@@ -137,9 +146,9 @@ function getEmployees() {
   const rows = sheet.getDataRange().getValues();
   const out = [];
   for (let i = 1; i < rows.length; i++) {
-    const [id, name, branch] = rows[i];
+    const [id, name, branch, profilePhotoUrl] = rows[i];
     if (!name) continue;
-    out.push({ id: String(id || i), name: String(name), branch: String(branch || '') });
+    out.push({ id: String(id || i), name: String(name), branch: String(branch || ''), profilePhotoUrl: String(profilePhotoUrl || '') });
   }
   return out;
 }
@@ -211,6 +220,106 @@ function addEmployee(rawName, rawBranch) {
 
 function invalidateEmployeeCache() {
   try { CacheService.getScriptCache().remove('employees_v1'); } catch (e) { /* abaikan */ }
+}
+
+/* ============================================
+   FOTO PROFIL — disimpan di Drive + kolom "FotoProfilURL" di sheet
+   Karyawan, BUKAN cuma di localStorage HP. Ini yang membuat foto profil
+   sinkron di semua device/browser milik karyawan yang sama, karena begitu
+   endpoint "employees" dipanggil dari HP mana pun, URL foto ini ikut
+   terbawa (lihat getEmployees()).
+   ------------------------------------------------
+   - Lock supaya dua request simpan foto nyaris bersamaan (jarang, tapi
+     bisa terjadi kalau user tap ulang saking lambat koneksinya) tidak
+     saling tabrak menulis baris yang sama.
+   - Kalau karyawan itu sebelumnya SUDAH punya foto profil (ganti foto),
+     file lamanya dihapus dari Drive dulu sebelum upload yang baru —
+     supaya folder Drive tidak menumpuk sampah foto profil basi.
+   - File baru diberi nama pakai employeeId (bukan timestamp) supaya kalau
+     suatu saat perlu dicari/dicocokkan manual di Drive, jelas itu foto
+     profil milik ID siapa.
+   ============================================ */
+function saveProfilePhoto(employeeId, photoBase64) {
+  if (!employeeId) {
+    return { ok: false, error: 'employeeId tidak ada' };
+  }
+  if (!photoBase64 || photoBase64.length < 100) {
+    return { ok: false, error: 'Foto tidak valid atau kosong' };
+  }
+
+  const lock = LockService.getScriptLock();
+  const gotLock = lock.tryLock(10000);
+  if (!gotLock) {
+    return { ok: false, error: 'Sistem sedang sibuk, coba lagi sebentar' };
+  }
+
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_KARYAWAN);
+    if (!sheet) {
+      return { ok: false, error: 'Sheet "Karyawan" tidak ditemukan' };
+    }
+
+    const rows = sheet.getDataRange().getValues();
+    let targetRow = -1;
+    let oldPhotoUrl = '';
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(employeeId)) {
+        targetRow = i + 1; // +1 karena getRange 1-based, +0 lagi karena rows[0] sudah header
+        oldPhotoUrl = String(rows[i][3] || '');
+        break;
+      }
+    }
+    if (targetRow === -1) {
+      return { ok: false, error: 'Karyawan tidak ditemukan di sheet' };
+    }
+
+    // Hapus foto profil lama (kalau ada) SEBELUM upload yang baru, supaya
+    // tidak ada jeda dimana dua-duanya numpuk di Drive kalau upload gagal
+    // di tengah jalan file lama tetap aman (baru dihapus setelah yakin ada).
+    if (oldPhotoUrl) {
+      deleteProfilePhotoFile(oldPhotoUrl);
+    }
+
+    const folder = getOrCreateProfileFolder();
+    const base64Data = photoBase64.indexOf(',') !== -1 ? photoBase64.split(',')[1] : photoBase64;
+    const fileName = `profil_${employeeId}.jpg`;
+    const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), 'image/jpeg', fileName);
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const photoUrl = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w500`;
+
+    // Kolom ke-4 = FotoProfilURL
+    sheet.getRange(targetRow, 4).setValue(photoUrl);
+    invalidateEmployeeCache();
+
+    return { ok: true, profilePhotoUrl: photoUrl };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getOrCreateProfileFolder() {
+  const folders = DriveApp.getFoldersByName(PROFILE_FOLDER_NAME);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(PROFILE_FOLDER_NAME);
+}
+
+// Mengambil file ID dari URL thumbnail Drive yang kita buat sendiri
+// (format: .../thumbnail?id=XXXX&sz=...) lalu menghapus filenya. Dibungkus
+// try-catch penuh supaya kalau filenya sudah terlanjur dihapus manual dari
+// Drive (atau formatnya beda krn foto lama dari versi sebelumnya), proses
+// simpan foto BARU tetap lanjut jalan — kegagalan hapus file lama bukan
+// alasan gagal keseluruhan.
+function deleteProfilePhotoFile(photoUrl) {
+  try {
+    const match = photoUrl.match(/[?&]id=([^&]+)/);
+    if (!match) return;
+    const file = DriveApp.getFileById(match[1]);
+    file.setTrashed(true);
+  } catch (e) { /* file tidak ditemukan/sudah terhapus — abaikan */ }
 }
 
 /* ============================================

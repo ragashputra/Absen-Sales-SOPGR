@@ -35,15 +35,29 @@ const GEOCODE_CACHE_KEY = 'absen_geocode_cache';
 const THEME_KEY = 'absen_theme';
 const HOME_CACHE_PREFIX = 'absen_home_cache_';
 const HISTORY_CACHE_PREFIX = 'absen_history_cache_';
-const PROFILE_PHOTO_PREFIX = 'absen_profile_photo_'; // + employeeId -> base64 dataURL
+const PROFILE_PHOTO_PREFIX = 'absen_profile_photo_'; // + employeeId -> base64 dataURL (cache lokal, sumber utama tetap server)
+const PROFILE_PHOTO_QUEUE_KEY = 'absen_pending_profile_photos'; // antrian foto profil yang gagal/belum sempat ke-upload ke server
 
 /* ============================================
    FOTO PROFIL — disimpan per-employeeId di localStorage supaya kalau ganti
    pengguna di HP yang sama, foto tidak pernah tertukar/bocor ke akun lain.
    ============================================ */
-function getProfilePhoto(employeeId) {
-  try { return localStorage.getItem(PROFILE_PHOTO_PREFIX + employeeId); }
-  catch (e) { return null; }
+function getProfilePhoto(employeeId, employee) {
+  try {
+    const cached = localStorage.getItem(PROFILE_PHOTO_PREFIX + employeeId);
+    if (cached) return cached;
+  } catch (e) { /* localStorage disabled — lanjut fallback ke server di bawah */ }
+
+  // Tidak ada cache lokal (mis. device/browser baru) — fallback ke URL foto
+  // profil dari server, kalau data karyawan yang diberikan memuatnya.
+  // Ini KUNCI kenapa foto profil sekarang sinkron lintas device: begitu
+  // employees ke-fetch dari Apps Script (lihat loadEmployees), profilePhotoUrl
+  // ikut terbawa, jadi device manapun bisa langsung tahu foto sudah ada.
+  if (employee && employee.profilePhotoUrl) {
+    try { localStorage.setItem(PROFILE_PHOTO_PREFIX + employeeId, employee.profilePhotoUrl); } catch (e) { /* abaikan */ }
+    return employee.profilePhotoUrl;
+  }
+  return null;
 }
 function setProfilePhoto(employeeId, dataUrl) {
   try { localStorage.setItem(PROFILE_PHOTO_PREFIX + employeeId, dataUrl); return true; }
@@ -131,7 +145,10 @@ async function init() {
   attachConnectivityListeners();
 
   await loadEmployees();
-  if (navigator.onLine) flushPendingEmployeeQueue();
+  if (navigator.onLine) {
+    flushPendingEmployeeQueue();
+    flushPendingProfilePhotoQueue();
+  }
 
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
@@ -265,7 +282,7 @@ function isAttendanceTypeAllowed(type) {
 // masuk ke kamera absensi (kartu Home, action sheet) supaya user tidak bisa
 // "melewati" kewajiban lewat jalur mana pun.
 function isProfilePhotoRequired() {
-  return !!(state.employee && !getProfilePhoto(state.employee.id));
+  return !!(state.employee && !getProfilePhoto(state.employee.id, state.employee));
 }
 
 // Dipanggil saat kartu "Masuk"/"Pulang" di Home diketuk. Kalau kondisi
@@ -338,6 +355,7 @@ function attachConnectivityListeners() {
     showToast('Koneksi kembali — mencoba kirim absensi tertunda…');
     flushPendingQueue();
     flushPendingEmployeeQueue();
+    flushPendingProfilePhotoQueue();
   });
   window.addEventListener('offline', () => {
     showToast('Kamu sedang offline. Absensi akan dikirim otomatis saat online.', true);
@@ -347,6 +365,7 @@ function attachConnectivityListeners() {
     if (document.visibilityState === 'visible' && navigator.onLine) {
       flushPendingQueue();
       flushPendingEmployeeQueue();
+      flushPendingProfilePhotoQueue();
     }
   });
 }
@@ -436,8 +455,17 @@ function renderEmployeeList(list) {
     const branchLine = emp.pending
       ? `<span class="employee-pending-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.3"/></svg>Menunggu sinkron</span>`
       : escapeHtml(emp.branch || '');
+    // Tampilkan foto profil asli di daftar pilih nama kalau sudah ada
+    // (dari server ATAU cache lokal, lihat getProfilePhoto) — supaya
+    // karyawan bisa langsung kenali namanya sendiri dari foto, bukan cuma
+    // inisial huruf. Fallback ke inisial tetap dipakai kalau belum ada foto
+    // sama sekali (mis. karyawan baru yang belum sempat verifikasi).
+    const photo = getProfilePhoto(emp.id, emp);
+    const avatarInner = photo
+      ? `<img src="${escapeHtml(photo)}" alt="${escapeHtml(emp.name)}" loading="lazy">`
+      : initials(emp.name);
     btn.innerHTML = `
-      <div class="employee-avatar">${initials(emp.name)}</div>
+      <div class="employee-avatar${photo ? ' has-photo' : ''}">${avatarInner}</div>
       <div class="employee-info">
         <div class="employee-name">${escapeHtml(emp.name)}</div>
         <div class="employee-branch">${branchLine}</div>
@@ -668,7 +696,7 @@ function initials(name) {
 // SEMUA salinan avatar di app (topbar Home & hero Profil) sekaligus, supaya
 // keduanya selalu sinkron tanpa perlu dipanggil manual berkali-kali.
 function renderAvatar(emp) {
-  const photo = emp ? getProfilePhoto(emp.id) : null;
+  const photo = emp ? getProfilePhoto(emp.id, emp) : null;
   const targets = [
     { container: 'home-employee-avatar', textEl: 'home-employee-avatar-text' },
     { container: 'profile-avatar', textEl: 'profile-avatar-text' }
@@ -712,7 +740,7 @@ function selectEmployee(emp) {
   // Dicek SETELAH layar Home ditampilkan (bukan sebelum) supaya transisi
   // tetap mulus — modal wajib ini tampil MENGAMBANG di atas Home yang
   // sudah termuat, bukan menggantikan alur navigasi normal.
-  if (!getProfilePhoto(emp.id)) {
+  if (!getProfilePhoto(emp.id, emp)) {
     requireProfilePhoto();
   }
 }
@@ -1384,7 +1412,7 @@ function retakePhoto() {
 // klik yang sama selalu diarahkan ke logic yang benar.
 function onSubmitPreview() {
   if (state.cameraMode === 'profile') {
-    saveProfilePhoto();
+    saveProfilePhotoFromCapture();
   } else {
     submitAttendance();
   }
@@ -1393,24 +1421,146 @@ function onSubmitPreview() {
 /* ============================================
    SIMPAN FOTO PROFIL (mode profil)
    ------------------------------------------------
-   Tidak ada request jaringan sama sekali — foto disimpan langsung ke
-   localStorage per-employeeId, lalu avatar di seluruh app diperbarui
-   SEKETIKA, dan user lanjut ke Home. Kalau localStorage penuh/gagal
-   (jarang, tapi mungkin di HP lawas), foto profil dianggap OPSIONAL demi
-   tidak mengunci user selamanya di layar kamera — user tetap bisa lanjut
-   pakai app dengan avatar inisial seperti biasa, dan sistem akan menawarkan
-   lagi di kesempatan berikutnya.
+   Foto profil di-UPLOAD ke server (Drive + kolom "FotoProfilURL" di sheet
+   Karyawan) — BUKAN cuma disimpan lokal — supaya begitu karyawan buka app
+   di HP lain atau browser lain, fotonya sudah ada dan tidak diminta ambil
+   ulang. localStorage tetap dipakai sebagai CACHE lokal saja (biar avatar
+   di app langsung berubah instan tanpa nunggu upload selesai, dan tetap
+   ada tampilan sesuatu walau sedang offline).
+
+   Alur:
+   1. Update localStorage & avatar SEKETIKA (optimistic) — UX tetap terasa
+      instan meski uploadnya di background.
+   2. Kalau online & backend siap: upload ke server. Berhasil -> selesai,
+      URL server jadi sumber kebenaran utama untuk device lain.
+   3. Kalau offline/gagal jaringan: masuk antrian PROFILE_PHOTO_QUEUE_KEY,
+      otomatis dicoba lagi lewat flushPendingProfilePhotoQueue() begitu
+      koneksi kembali (dipanggil dari listener online yang sama dengan
+      antrian absensi & antrian tambah nama, supaya semua sinkronisasi
+      terjadi bersamaan & konsisten).
+   4. Foto profil TIDAK PERNAH dianggap wajib berhasil upload sebelum user
+      bisa lanjut pakai app — kalau uploadnya gagal, user tetap lanjut ke
+      Home dengan foto tersimpan lokal, dan sinkronisasi menyusul otomatis.
    ============================================ */
-function saveProfilePhoto() {
-  const ok = setProfilePhoto(state.employee.id, state.capturedPhoto);
+function saveProfilePhotoFromCapture() {
+  const employeeId = state.employee.id;
+  const photoDataUrl = state.capturedPhoto;
+
+  // 1) Optimistic: langsung terasa di UI, tidak nunggu network sama sekali.
+  const savedLocally = setProfilePhoto(employeeId, photoDataUrl);
   renderAvatar(state.employee);
   clearInterval(state.timestampInterval);
   state.cameraMode = 'attendance';
   goToHome();
-  if (ok) {
-    showToast('Verifikasi identitas berhasil — foto profil telah disimpan');
-  } else {
+
+  if (!savedLocally) {
     showToast('Foto profil belum tersimpan di perangkat ini, silakan coba lagi dari halaman Profil', true);
+  }
+
+  // 2) Upload ke server di background, tanpa mengunci navigasi user.
+  uploadProfilePhoto(employeeId, photoDataUrl);
+}
+
+async function uploadProfilePhoto(employeeId, photoDataUrl) {
+  if (!isBackendConfigured() || !navigator.onLine) {
+    queueProfilePhotoOffline(employeeId, photoDataUrl);
+    showToast('Kamu sedang offline — foto profil akan disinkronkan otomatis nanti.');
+    return;
+  }
+
+  try {
+    const data = await fetchJsonWithTimeout(
+      `${CONFIG.APPS_SCRIPT_URL}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'saveProfilePhoto', employeeId, photoBase64: photoDataUrl })
+      },
+      25000 // foto profil relatif kecil (sudah dikompres sama seperti foto absen), tapi kasih ruang cukup utk jaringan lambat
+    );
+
+    if (data.ok) {
+      showToast('Verifikasi identitas berhasil — foto profil tersinkron ke server.');
+      applyServerProfilePhoto(employeeId, data.profilePhotoUrl);
+    } else {
+      // Ditolak server (bukan soal jaringan) -> tetap simpan sebagai pending
+      // supaya tidak hilang, sambil kasih tahu apa alasannya kalau perlu dicek.
+      queueProfilePhotoOffline(employeeId, photoDataUrl);
+    }
+  } catch (err) {
+    // Gagal jaringan/timeout -> antrian, dicoba lagi otomatis nanti.
+    queueProfilePhotoOffline(employeeId, photoDataUrl);
+    showToast('Jaringan bermasalah — foto profil akan disinkronkan otomatis nanti.');
+  }
+}
+
+function queueProfilePhotoOffline(employeeId, photoDataUrl) {
+  const queue = readProfilePhotoQueue();
+  // Satu karyawan cukup satu entri antrian — kalau sebelumnya sudah ada
+  // (mis. ganti foto lagi sebelum sempat sinkron), timpa saja yang lama,
+  // jangan menumpuk banyak entri untuk orang yang sama.
+  const filtered = queue.filter(item => item.employeeId !== employeeId);
+  filtered.push({ employeeId, photoDataUrl, queuedAt: Date.now() });
+  writeProfilePhotoQueue(filtered);
+}
+
+function readProfilePhotoQueue() {
+  try { return JSON.parse(localStorage.getItem(PROFILE_PHOTO_QUEUE_KEY)) || []; }
+  catch (e) { return []; }
+}
+function writeProfilePhotoQueue(queue) {
+  try { localStorage.setItem(PROFILE_PHOTO_QUEUE_KEY, JSON.stringify(queue)); }
+  catch (e) { /* storage penuh/disabled — jarang terjadi, foto sudah terkompresi kecil */ }
+}
+
+let profilePhotoFlushInProgress = false;
+async function flushPendingProfilePhotoQueue() {
+  if (profilePhotoFlushInProgress) return;
+  const queue = readProfilePhotoQueue();
+  if (!queue.length || !isBackendConfigured() || !navigator.onLine) return;
+
+  profilePhotoFlushInProgress = true;
+  const remaining = [];
+  let syncedCount = 0;
+
+  for (const item of queue) {
+    try {
+      const data = await fetchJsonWithTimeout(
+        `${CONFIG.APPS_SCRIPT_URL}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'saveProfilePhoto', employeeId: item.employeeId, photoBase64: item.photoDataUrl })
+        },
+        25000
+      );
+      if (data.ok) {
+        syncedCount++;
+        applyServerProfilePhoto(item.employeeId, data.profilePhotoUrl);
+      } else {
+        remaining.push(item);
+      }
+    } catch (e) {
+      remaining.push(item); // masih gagal jaringan, coba lagi nanti
+    }
+  }
+
+  writeProfilePhotoQueue(remaining);
+  profilePhotoFlushInProgress = false;
+
+  if (syncedCount > 0) {
+    showToast(`Foto profil (${syncedCount}) berhasil disinkronkan ke server.`);
+  }
+}
+
+// Setelah foto profil berhasil tersimpan/tersinkron ke server, samakan
+// data URL-nya di state.employees (dipakai daftar pilih nama) supaya
+// avatar di layar login ikut ter-update tanpa perlu reload manual.
+function applyServerProfilePhoto(employeeId, profilePhotoUrl) {
+  const emp = state.employees.find(e => e.id === employeeId);
+  if (emp) emp.profilePhotoUrl = profilePhotoUrl;
+  if (document.getElementById('screen-login').classList.contains('active')) {
+    renderEmployeeList(state.employees);
   }
 }
 
