@@ -99,7 +99,7 @@
     </div>
 
     <div class="status-rail">
-      <div class="status-card status-card-in" id="card-masuk">
+      <div class="status-card status-card-in" id="card-masuk" role="button" tabindex="0" aria-label="Absen masuk">
         <div class="status-card-head">
           <span class="status-icon">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -109,7 +109,7 @@
         <div class="status-value" id="status-masuk-time">--:--</div>
         <div class="status-window" id="status-masuk-window">Belum absen</div>
       </div>
-      <div class="status-card status-card-out" id="card-keluar">
+      <div class="status-card status-card-out" id="card-keluar" role="button" tabindex="0" aria-label="Absen pulang">
         <div class="status-card-head">
           <span class="status-icon">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -155,7 +155,7 @@
 <div id="sheet-overlay" class="sheet-overlay hidden">
   <div class="sheet-box">
     <div class="sheet-handle"></div>
-    <h3 class="sheet-title">Pilih jenis absen</h3>
+    <h3 class="sheet-title">Pilih jenis absensi</h3>
     <button class="sheet-option" id="sheet-btn-masuk">
       <span class="sheet-option-icon sheet-icon-in">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>

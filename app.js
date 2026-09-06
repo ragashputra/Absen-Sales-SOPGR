@@ -160,6 +160,28 @@ function attachEventListeners() {
     document.getElementById(id).addEventListener('click', openAbsenSheet);
   });
 
+  // Kartu "Masuk" & "Pulang" di Home: jalan pintas langsung ke kamera dengan
+  // tipe yang sesuai, tanpa perlu buka action sheet dulu. Aturan validasi
+  // SAMA PERSIS dengan tombol kamera (lihat openAbsenSheet/isTypeTappable):
+  // - Masuk sudah tercatat -> ketuk kartu Masuk tidak melakukan apa-apa
+  // - Pulang sudah tercatat, ATAU Masuk belum dilakukan -> ketuk kartu
+  //   Pulang tidak melakukan apa-apa (silent, tanpa toast/error) supaya
+  //   konsisten dengan perilaku tombol "Absen Keluar" di action sheet yang
+  //   memang di-disable pada kondisi sama.
+  document.getElementById('card-masuk').addEventListener('click', () => tapAttendanceCard('masuk'));
+  document.getElementById('card-keluar').addEventListener('click', () => tapAttendanceCard('keluar'));
+  // Dukungan keyboard (Enter/Space) karena kartu ini role="button" tapi
+  // bukan elemen <button> asli — supaya tetap bisa dioperasikan lewat
+  // keyboard/switch-access, bukan cuma sentuhan/klik mouse.
+  [['card-masuk', 'masuk'], ['card-keluar', 'keluar']].forEach(([id, type]) => {
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        tapAttendanceCard(type);
+      }
+    });
+  });
+
   // Action sheet: pilih Absen Masuk / Absen Keluar
   document.getElementById('sheet-btn-masuk').addEventListener('click', () => {
     closeAbsenSheet();
@@ -201,15 +223,37 @@ function goToProfile() {
 /* ============================================
    ACTION SHEET — pilih Absen Masuk / Keluar
    ============================================ */
-function openAbsenSheet() {
-  // Sinkronkan status tombol di sheet dengan status hari ini
+// Satu-satunya tempat aturan validasi "boleh absen tipe X atau tidak"
+// didefinisikan — dipakai bareng oleh action sheet (untuk disable tombol)
+// dan kartu Masuk/Pulang di Home (untuk tap-langsung-ke-kamera), supaya
+// keduanya SELALU konsisten dan tidak pernah punya aturan yang beda-beda.
+function isAttendanceTypeAllowed(type) {
   const masukDone = !!(state.todayStatus && state.todayStatus.masuk);
   const keluarDone = !!(state.todayStatus && state.todayStatus.keluar);
+  if (type === 'masuk') return !masukDone;
+  return !keluarDone && masukDone; // 'keluar' butuh masuk sudah tercatat dulu
+}
 
+// Dipanggil saat kartu "Masuk"/"Pulang" di Home diketuk. Kalau kondisi
+// belum valid (sudah absen tipe ini, atau keluar sebelum masuk), sengaja
+// TIDAK melakukan apa-apa — sama seperti tombol senama di action sheet yang
+// memang di-disable pada kondisi itu, jadi tidak butuh toast/error terpisah.
+function tapAttendanceCard(type) {
+  // Selagi status hari ini masih di-refresh dari server (card berlabel
+  // .loading), JANGAN proses tap dulu — cache lokal yang lagi ditampilkan
+  // bisa saja sudah basi (mis. baru absen dari HP lain), jadi kartu bisa
+  // memicu openCamera dengan asumsi status yang salah sesaat.
+  if (document.getElementById('card-masuk').classList.contains('loading')) return;
+  if (!isAttendanceTypeAllowed(type)) return;
+  openCamera(type);
+}
+
+function openAbsenSheet() {
+  // Sinkronkan status tombol di sheet dengan status hari ini
   const btnMasuk = document.getElementById('sheet-btn-masuk');
   const btnKeluar = document.getElementById('sheet-btn-keluar');
-  btnMasuk.disabled = masukDone;
-  btnKeluar.disabled = keluarDone || !masukDone;
+  btnMasuk.disabled = !isAttendanceTypeAllowed('masuk');
+  btnKeluar.disabled = !isAttendanceTypeAllowed('keluar');
 
   document.getElementById('sheet-overlay').classList.remove('hidden');
 }
@@ -470,6 +514,11 @@ function renderTodayStatus(data) {
     windowKeluar.textContent = 'Belum absen';
     windowKeluar.removeAttribute('title');
   }
+
+  // Kartu Pulang belum boleh diketuk selama Masuk belum tercatat — kasih
+  // penanda visual (dim + cursor not-allowed) yang beda dari "sudah terisi",
+  // supaya user paham ALASAN kenapa ketukannya tidak merespons.
+  cardKeluar.classList.toggle('locked', !data.masuk && !data.keluar);
   // Tombol Absen Masuk/Keluar kini ada di action sheet (tombol + bottom nav),
   // status enable/disable-nya diatur di openAbsenSheet() berdasarkan state.todayStatus.
 }
