@@ -7,6 +7,7 @@ const state = {
   employee: null,        // {id, name, branch}
   employees: [],
   currentType: null,     // 'masuk' | 'keluar'
+  cameraMode: 'attendance', // 'attendance' | 'profile' — menentukan alur kamera & preview mana yang aktif
   gps: null,             // {lat, lng, accuracy, address, addressSource}
   gpsWatchId: null,
   gpsLocked: false,
@@ -29,10 +30,25 @@ const state = {
 
 const STORAGE_KEY = 'absen_employee';
 const QUEUE_KEY = 'absen_pending_queue';
+const EMPLOYEE_QUEUE_KEY = 'absen_pending_employees'; // nama yang ditambah pas offline, menunggu sinkron ke Sheets
 const GEOCODE_CACHE_KEY = 'absen_geocode_cache';
 const THEME_KEY = 'absen_theme';
 const HOME_CACHE_PREFIX = 'absen_home_cache_';
 const HISTORY_CACHE_PREFIX = 'absen_history_cache_';
+const PROFILE_PHOTO_PREFIX = 'absen_profile_photo_'; // + employeeId -> base64 dataURL
+
+/* ============================================
+   FOTO PROFIL — disimpan per-employeeId di localStorage supaya kalau ganti
+   pengguna di HP yang sama, foto tidak pernah tertukar/bocor ke akun lain.
+   ============================================ */
+function getProfilePhoto(employeeId) {
+  try { return localStorage.getItem(PROFILE_PHOTO_PREFIX + employeeId); }
+  catch (e) { return null; }
+}
+function setProfilePhoto(employeeId, dataUrl) {
+  try { localStorage.setItem(PROFILE_PHOTO_PREFIX + employeeId, dataUrl); return true; }
+  catch (e) { return false; } // storage penuh/disabled — ditangani di pemanggil
+}
 
 /* ============================================
    CACHE LOKAL (stale-while-revalidate)
@@ -115,6 +131,7 @@ async function init() {
   attachConnectivityListeners();
 
   await loadEmployees();
+  if (navigator.onLine) flushPendingEmployeeQueue();
 
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
@@ -132,12 +149,19 @@ async function init() {
 
 function attachEventListeners() {
   document.getElementById('employee-search').addEventListener('input', onSearchInput);
+  document.getElementById('btn-add-employee').addEventListener('click', openAddEmployeeModal);
+  document.getElementById('btn-cancel-add-employee').addEventListener('click', closeAddEmployeeModal);
+  document.getElementById('btn-confirm-add-employee').addEventListener('click', onConfirmAddEmployee);
+  document.getElementById('input-new-employee-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); onConfirmAddEmployee(); }
+  });
   document.getElementById('btn-logout').addEventListener('click', onLogout);
   document.getElementById('btn-camera-close').addEventListener('click', closeCamera);
   document.getElementById('btn-shutter').addEventListener('click', capturePhoto);
   document.getElementById('btn-retake').addEventListener('click', retakePhoto);
-  document.getElementById('btn-submit').addEventListener('click', submitAttendance);
+  document.getElementById('btn-submit').addEventListener('click', onSubmitPreview);
   document.getElementById('btn-back-home').addEventListener('click', goToHome);
+  document.getElementById('btn-start-profile-photo').addEventListener('click', startProfilePhotoCapture);
 
   // Bottom nav — ada 3 salinan (di screen-home, screen-history & screen-profile)
   // supaya nav selalu tampil di setiap layar; semuanya terhubung ke fungsi yang sama.
@@ -234,6 +258,13 @@ function isAttendanceTypeAllowed(type) {
   return !keluarDone && masukDone; // 'keluar' butuh masuk sudah tercatat dulu
 }
 
+// Foto profil wajib diselesaikan dulu sebelum absen — dicek di SEMUA pintu
+// masuk ke kamera absensi (kartu Home, action sheet) supaya user tidak bisa
+// "melewati" kewajiban lewat jalur mana pun.
+function isProfilePhotoRequired() {
+  return !!(state.employee && !getProfilePhoto(state.employee.id));
+}
+
 // Dipanggil saat kartu "Masuk"/"Pulang" di Home diketuk. Kalau kondisi
 // belum valid (sudah absen tipe ini, atau keluar sebelum masuk), sengaja
 // TIDAK melakukan apa-apa — sama seperti tombol senama di action sheet yang
@@ -244,11 +275,17 @@ function tapAttendanceCard(type) {
   // bisa saja sudah basi (mis. baru absen dari HP lain), jadi kartu bisa
   // memicu openCamera dengan asumsi status yang salah sesaat.
   if (document.getElementById('card-masuk').classList.contains('loading')) return;
+  if (isProfilePhotoRequired()) { requireProfilePhoto(); return; }
   if (!isAttendanceTypeAllowed(type)) return;
   openCamera(type);
 }
 
 function openAbsenSheet() {
+  // Foto profil belum ada -> tampilkan lagi modal wajib, jangan buka sheet
+  // absen sama sekali (mencegah lubang: user absen dulu, baru "kebetulan"
+  // isi foto profil belakangan).
+  if (isProfilePhotoRequired()) { requireProfilePhoto(); return; }
+
   // Sinkronkan status tombol di sheet dengan status hari ini
   const btnMasuk = document.getElementById('sheet-btn-masuk');
   const btnKeluar = document.getElementById('sheet-btn-keluar');
@@ -297,6 +334,7 @@ function attachConnectivityListeners() {
   window.addEventListener('online', () => {
     showToast('Koneksi kembali — mencoba kirim absensi tertunda…');
     flushPendingQueue();
+    flushPendingEmployeeQueue();
   });
   window.addEventListener('offline', () => {
     showToast('Kamu sedang offline. Absensi akan dikirim otomatis saat online.', true);
@@ -305,6 +343,7 @@ function attachConnectivityListeners() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && navigator.onLine) {
       flushPendingQueue();
+      flushPendingEmployeeQueue();
     }
   });
 }
@@ -342,7 +381,7 @@ async function loadEmployees() {
   // Tampilkan dulu daftar default (instan, tanpa nunggu jaringan) supaya
   // layar tidak pernah kosong walau backend belum di-setup atau offline.
   const fallback = Array.isArray(CONFIG.EMPLOYEES) ? CONFIG.EMPLOYEES : [];
-  state.employees = fallback;
+  state.employees = mergeWithPendingEmployees(fallback);
   renderEmployeeList(state.employees);
 
   const backendConfigured = isBackendConfigured();
@@ -353,12 +392,27 @@ async function loadEmployees() {
   try {
     const data = await fetchJsonWithTimeout(`${CONFIG.APPS_SCRIPT_URL}?action=employees`, {}, 8000);
     if (Array.isArray(data.employees) && data.employees.length) {
-      state.employees = data.employees;
+      state.employees = mergeWithPendingEmployees(data.employees);
       renderEmployeeList(state.employees);
     }
   } catch (e) {
     // offline / backend belum jalan → tetap pakai fallback yang sudah tampil
   }
+}
+
+// Menggabungkan daftar karyawan "resmi" (dari server/fallback config) dengan
+// nama-nama yang baru ditambah pas offline dan masih menunggu sinkron ke
+// Sheets. Supaya nama itu tetap bisa langsung dipakai buat absen SEKARANG
+// (tidak perlu menunggu koneksi balik dulu), dan tidak hilang begitu app
+// dibuka ulang sebelum sempat tersinkron.
+function mergeWithPendingEmployees(list) {
+  const pending = readEmployeeQueue();
+  if (!pending.length) return list;
+  const existingNames = new Set(list.map(e => e.name.trim().toLowerCase()));
+  const extra = pending
+    .filter(p => !existingNames.has(p.name.trim().toLowerCase()))
+    .map(p => ({ id: p.localId, name: p.name, branch: p.branch || '', pending: true }));
+  return list.concat(extra);
 }
 
 function renderEmployeeList(list) {
@@ -376,11 +430,14 @@ function renderEmployeeList(list) {
   list.forEach(emp => {
     const btn = document.createElement('button');
     btn.className = 'employee-item';
+    const branchLine = emp.pending
+      ? `<span class="employee-pending-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.3"/></svg>Menunggu sinkron</span>`
+      : escapeHtml(emp.branch || '');
     btn.innerHTML = `
       <div class="employee-avatar">${initials(emp.name)}</div>
       <div class="employee-info">
         <div class="employee-name">${escapeHtml(emp.name)}</div>
-        <div class="employee-branch">${escapeHtml(emp.branch || '')}</div>
+        <div class="employee-branch">${branchLine}</div>
       </div>
       <svg class="employee-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     `;
@@ -396,8 +453,239 @@ function onSearchInput(e) {
   renderEmployeeList(filtered);
 }
 
+/* ============================================
+   TAMBAH NAMA BARU DARI PWA
+   ------------------------------------------------
+   Alur:
+   1. User ketuk "Tambah Nama Baru" -> modal input nama.
+   2. Kalau online: POST langsung ke Apps Script (action=addEmployee),
+      tunggu hasilnya, lalu masukkan ke state.employees & auto-pilih.
+   3. Kalau offline (atau request gagal karena jaringan): simpan ke
+      EMPLOYEE_QUEUE_KEY dengan id lokal sementara ("local_<timestamp>"),
+      tetap tampil di daftar (dengan badge "Menunggu sinkron") dan tetap
+      bisa langsung dipakai absen — begitu koneksi kembali, antrian ini
+      otomatis dikirim ke Sheets lewat flushPendingEmployeeQueue() dan
+      ID lokal diganti ID asli dari server.
+   ============================================ */
+function openAddEmployeeModal() {
+  const input = document.getElementById('input-new-employee-name');
+  const errorEl = document.getElementById('add-employee-error');
+  input.value = '';
+  input.classList.remove('input-error');
+  errorEl.classList.add('hidden');
+  errorEl.textContent = '';
+  document.getElementById('add-employee-overlay').classList.remove('hidden');
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeAddEmployeeModal() {
+  document.getElementById('add-employee-overlay').classList.add('hidden');
+}
+
+function setAddEmployeeError(message) {
+  const input = document.getElementById('input-new-employee-name');
+  const errorEl = document.getElementById('add-employee-error');
+  input.classList.add('input-error');
+  errorEl.textContent = message;
+  errorEl.classList.remove('hidden');
+}
+
+let addEmployeeSubmitting = false;
+async function onConfirmAddEmployee() {
+  if (addEmployeeSubmitting) return;
+
+  const input = document.getElementById('input-new-employee-name');
+  const name = input.value.trim().replace(/\s+/g, ' ');
+
+  if (!name) {
+    setAddEmployeeError('Nama tidak boleh kosong.');
+    return;
+  }
+  if (name.length < 2) {
+    setAddEmployeeError('Nama terlalu pendek.');
+    return;
+  }
+  if (name.length > 100) {
+    setAddEmployeeError('Nama terlalu panjang.');
+    return;
+  }
+  // Cek duplikat lokal dulu (termasuk yang masih pending) supaya tidak
+  // menembak backend untuk nama yang jelas-jelas sudah ada di layar ini.
+  const already = state.employees.find(e => e.name.trim().toLowerCase() === name.toLowerCase());
+  if (already) {
+    setAddEmployeeError('Nama ini sudah ada di daftar.');
+    return;
+  }
+
+  addEmployeeSubmitting = true;
+  const btn = document.getElementById('btn-confirm-add-employee');
+  const btnOriginalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Menyimpan…';
+  document.getElementById('btn-cancel-add-employee').disabled = true;
+
+  try {
+    if (!isBackendConfigured() || !navigator.onLine) {
+      queueEmployeeOffline(name);
+      closeAddEmployeeModal();
+      showToast('Kamu sedang offline — nama disimpan & akan disinkronkan otomatis nanti.');
+      return;
+    }
+
+    try {
+      const data = await fetchJsonWithTimeout(
+        `${CONFIG.APPS_SCRIPT_URL}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight ke Apps Script
+          body: JSON.stringify({ action: 'addEmployee', name })
+        },
+        12000
+      );
+
+      if (!data.ok) {
+        setAddEmployeeError(data.error || 'Gagal menyimpan nama. Coba lagi.');
+        return;
+      }
+
+      const emp = data.employee;
+      const exists = state.employees.find(e => e.id === emp.id);
+      if (!exists) {
+        state.employees.push(emp);
+        renderEmployeeList(state.employees);
+      }
+      closeAddEmployeeModal();
+      showToast(data.duplicate ? 'Nama sudah terdaftar sebelumnya — langsung dipilih.' : 'Nama baru berhasil ditambahkan.');
+      selectEmployee(emp);
+    } catch (networkErr) {
+      // Gagal karena jaringan (timeout/offline mendadak) -> jangan buang
+      // input user, simpan sebagai pending supaya tetap bisa dipakai & akan
+      // otomatis dicoba lagi begitu online.
+      queueEmployeeOffline(name);
+      closeAddEmployeeModal();
+      showToast('Jaringan bermasalah — nama disimpan & akan disinkronkan otomatis nanti.');
+    }
+  } finally {
+    addEmployeeSubmitting = false;
+    btn.disabled = false;
+    btn.textContent = btnOriginalText;
+    document.getElementById('btn-cancel-add-employee').disabled = false;
+  }
+}
+
+function queueEmployeeOffline(name) {
+  const localId = 'local_' + Date.now();
+  const queue = readEmployeeQueue();
+  queue.push({ localId, name, branch: '', queuedAt: Date.now() });
+  writeEmployeeQueue(queue);
+
+  const emp = { id: localId, name, branch: '', pending: true };
+  state.employees.push(emp);
+  renderEmployeeList(state.employees);
+  selectEmployee(emp);
+}
+
+function readEmployeeQueue() {
+  try { return JSON.parse(localStorage.getItem(EMPLOYEE_QUEUE_KEY)) || []; }
+  catch (e) { return []; }
+}
+function writeEmployeeQueue(queue) {
+  try { localStorage.setItem(EMPLOYEE_QUEUE_KEY, JSON.stringify(queue)); }
+  catch (e) { /* storage penuh/disabled, abaikan — jarang terjadi utk data sekecil ini */ }
+}
+
+let employeeFlushInProgress = false;
+async function flushPendingEmployeeQueue() {
+  if (employeeFlushInProgress) return;
+  const queue = readEmployeeQueue();
+  if (!queue.length || !isBackendConfigured() || !navigator.onLine) return;
+
+  employeeFlushInProgress = true;
+  const remaining = [];
+  let syncedCount = 0;
+
+  for (const item of queue) {
+    try {
+      const data = await fetchJsonWithTimeout(
+        `${CONFIG.APPS_SCRIPT_URL}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'addEmployee', name: item.name, branch: item.branch })
+        },
+        12000
+      );
+
+      if (data.ok) {
+        syncedCount++;
+        replaceLocalEmployeeId(item.localId, data.employee);
+      } else {
+        remaining.push(item); // ditolak server (mis. nama tidak valid), simpan utk dicek manual
+      }
+    } catch (e) {
+      remaining.push(item); // masih gagal jaringan, coba lagi nanti
+    }
+  }
+
+  writeEmployeeQueue(remaining);
+  employeeFlushInProgress = false;
+
+  if (syncedCount > 0) {
+    showToast(`${syncedCount} nama baru berhasil disinkronkan ke server.`);
+  }
+}
+
+// Setelah nama lokal berhasil disinkronkan, ganti ID sementara ("local_...")
+// dengan ID asli dari Sheets di state.employees, daftar yang sedang tampil,
+// DAN sesi yang sedang login (STORAGE_KEY) kalau kebetulan user itu sendiri
+// yang sedang aktif memakai app — supaya semua rujukan konsisten dan absen
+// berikutnya tersimpan dengan employeeId yang benar/permanen di Sheets.
+function replaceLocalEmployeeId(localId, newEmp) {
+  const idx = state.employees.findIndex(e => e.id === localId);
+  if (idx !== -1) state.employees[idx] = newEmp;
+
+  if (document.getElementById('screen-login').classList.contains('active')) {
+    renderEmployeeList(state.employees);
+  }
+
+  if (state.employee && state.employee.id === localId) {
+    state.employee = newEmp;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(newEmp));
+  }
+}
+
 function initials(name) {
   return name.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+}
+
+// Menerapkan avatar (foto profil kalau sudah ada, fallback ke inisial) ke
+// SEMUA salinan avatar di app (topbar Home & hero Profil) sekaligus, supaya
+// keduanya selalu sinkron tanpa perlu dipanggil manual berkali-kali.
+function renderAvatar(emp) {
+  const photo = emp ? getProfilePhoto(emp.id) : null;
+  const targets = [
+    { container: 'home-employee-avatar', textEl: 'home-employee-avatar-text' },
+    { container: 'profile-avatar', textEl: 'profile-avatar-text' }
+  ];
+  targets.forEach(({ container, textEl }) => {
+    const el = document.getElementById(container);
+    if (!el) return;
+    const existingImg = el.querySelector('img');
+    if (photo) {
+      if (existingImg) {
+        existingImg.src = photo;
+      } else {
+        const img = document.createElement('img');
+        img.src = photo;
+        img.alt = 'Foto profil';
+        el.appendChild(img);
+      }
+    } else if (existingImg) {
+      existingImg.remove();
+    }
+    const span = document.getElementById(textEl);
+    if (span) span.textContent = emp ? initials(emp.name) : '—';
+  });
 }
 
 function selectEmployee(emp) {
@@ -405,14 +693,22 @@ function selectEmployee(emp) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(emp));
   document.getElementById('home-employee-name').textContent = emp.name;
   document.getElementById('home-employee-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
-  document.getElementById('home-employee-avatar').textContent = initials(emp.name);
   document.getElementById('profile-name').textContent = emp.name;
   document.getElementById('profile-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
-  document.getElementById('profile-avatar').textContent = initials(emp.name);
+  renderAvatar(emp);
   setBottomNavActive('home');
   showScreen('screen-home');
   refreshHome();
   flushPendingQueue();
+
+  // WAJIB: kalau akun ini belum pernah punya foto profil sama sekali,
+  // paksa user mengambil selfie dulu sebelum bisa memakai app lebih jauh.
+  // Dicek SETELAH layar Home ditampilkan (bukan sebelum) supaya transisi
+  // tetap mulus — modal wajib ini tampil MENGAMBANG di atas Home yang
+  // sudah termuat, bukan menggantikan alur navigasi normal.
+  if (!getProfilePhoto(emp.id)) {
+    requireProfilePhoto();
+  }
 }
 
 function onLogout() {
@@ -528,12 +824,60 @@ function renderTodayStatus(data) {
    ============================================ */
 async function openCamera(type) {
   state.currentType = type;
+  state.cameraMode = 'attendance';
   document.getElementById('camera-mode-chip').textContent = type === 'masuk' ? 'ABSENSI MASUK' : 'ABSENSI KELUAR';
+  document.getElementById('gps-panel').classList.remove('hidden');
+  document.getElementById('profile-photo-hint').classList.add('hidden');
+  // Tombol close kembali ke perilaku normal (batalkan & pulang ke Home) —
+  // lihat requireProfilePhoto() untuk kondisi WAJIB yang menyembunyikannya.
+  document.getElementById('btn-camera-close').classList.remove('invisible-slot');
   showScreen('screen-camera');
   resetGpsPanel();
   startGpsWatch();
   startCameraStream();
 
+  updateCameraTimestamp();
+  state.timestampInterval = setInterval(updateCameraTimestamp, 1000);
+}
+
+/* ============================================
+   FOTO PROFIL WAJIB (pertama kali login)
+   ------------------------------------------------
+   Alur terpisah dari absensi masuk/keluar: tidak butuh GPS sama sekali,
+   dan tidak boleh dibatalkan sebelum foto benar-benar tersimpan (sesuai
+   kebutuhan "wajib"). Reuse layar kamera & preview yang sama supaya app
+   tidak perlu screen duplikat, tapi lewat state.cameraMode = 'profile'
+   semua elemen yang GPS-dependent (panel, tombol close, dsb) disembunyikan
+   otomatis dan capturePhoto()/showPreview() bercabang sesuai mode.
+   ============================================ */
+function requireProfilePhoto() {
+  document.getElementById('required-photo-overlay').classList.remove('hidden');
+}
+
+function startProfilePhotoCapture() {
+  document.getElementById('required-photo-overlay').classList.add('hidden');
+  state.cameraMode = 'profile';
+  state.currentType = null;
+  document.getElementById('camera-mode-chip').textContent = 'FOTO PROFIL';
+  // GPS panel & tombol close disembunyikan: foto profil tidak butuh lokasi,
+  // dan TIDAK BOLEH dibatalkan begitu saja di tengah jalan (wajib selesai).
+  document.getElementById('gps-panel').classList.add('hidden');
+  document.getElementById('profile-photo-hint').classList.remove('hidden');
+  // "invisible-slot" (BUKAN .hidden/display:none) sengaja dipakai di sini:
+  // tombol close tetap makan ruang layout yang sama seperti biasa, cuma
+  // tidak terlihat & tidak bisa diklik. Kalau pakai display:none, ruang
+  // yang ditinggalkannya hilang sementara .topbar-spacer di kanan tetap
+  // ada lebarnya -> chip "FOTO PROFIL" jadi tidak center, ketarik ke kiri.
+  document.getElementById('btn-camera-close').classList.add('invisible-slot');
+  showScreen('screen-camera');
+
+  // Shutter langsung aktif (tidak menunggu GPS sama sekali) karena foto
+  // profil murni cuma butuh video feed kamera.
+  const shutterBtn = document.getElementById('btn-shutter');
+  shutterBtn.disabled = false;
+  document.getElementById('camera-hint').textContent = 'Ketuk tombol untuk mengambil foto profil';
+
+  startCameraStream();
   updateCameraTimestamp();
   state.timestampInterval = setInterval(updateCameraTimestamp, 1000);
 }
@@ -548,11 +892,25 @@ function startCameraStream() {
     video.srcObject = stream;
     startFaceDistanceWatch(video);
   }).catch(() => {
+    // Kalau mode profil (wajib) dan kamera gagal diakses, tombol "Kembali"
+    // TIDAK BOLEH langsung pulang ke Home (itu akan membiarkan foto profil
+    // tetap kosong selamanya) — arahkan balik ke modal wajib supaya user
+    // bisa coba lagi memberi izin kamera, bukan lolos dari kewajibannya.
+    const isProfileMode = state.cameraMode === 'profile';
     showModal({
       icon: 'error',
       title: 'Tidak bisa akses kamera',
-      message: 'Izinkan akses kamera di pengaturan browser untuk melanjutkan absensi.',
-      actions: [{ label: 'Kembali', style: 'solid', onClick: closeCamera }]
+      message: isProfileMode
+        ? 'Izinkan akses kamera di pengaturan browser untuk melengkapi foto profil.'
+        : 'Izinkan akses kamera di pengaturan browser untuk melanjutkan absensi.',
+      actions: [{ label: 'Kembali', style: 'solid', onClick: () => {
+        if (isProfileMode) {
+          showScreen('screen-home');
+          requireProfilePhoto();
+        } else {
+          closeCamera();
+        }
+      } }]
     });
   });
 }
@@ -902,6 +1260,17 @@ async function geocodeBigDataCloud(lat, lng) {
    CAMERA LIFECYCLE
    ============================================ */
 function closeCamera() {
+  // Guard defensif: di mode profil (wajib), tombol close ini disembunyikan
+  // dari UI (lihat startProfilePhotoCapture), tapi kalau tetap terpanggil
+  // lewat jalur lain, JANGAN biarkan user lolos tanpa foto profil — arahkan
+  // balik ke modal wajib alih-alih pulang ke Home dengan tangan kosong.
+  if (state.cameraMode === 'profile') {
+    stopCameraStream();
+    clearInterval(state.timestampInterval);
+    showScreen('screen-home');
+    requireProfilePhoto();
+    return;
+  }
   stopCameraStream();
   stopGpsWatch();
   clearInterval(state.timestampInterval);
@@ -921,9 +1290,17 @@ function stopCameraStream() {
    supaya proses "capture -> siap kirim" secepat mungkin.
    ============================================ */
 function capturePhoto() {
-  if (!state.gps) return;
+  // Mode profil tidak butuh GPS sama sekali; mode absensi tetap wajib
+  // punya titik GPS sebelum shutter boleh benar-benar memotret.
+  if (state.cameraMode === 'attendance' && !state.gps) return;
 
   const video = document.getElementById('camera-video');
+  // Guard: video feed belum siap (mis. getUserMedia masih pending/gagal,
+  // atau ditekan sepersekian detik terlalu cepat) -> videoWidth/Height masih
+  // 0, yang akan menghasilkan canvas kosong 0x0 kalau diteruskan. Diamkan
+  // saja ketukannya daripada menyimpan foto rusak/blank.
+  if (!video.videoWidth || !video.videoHeight) return;
+
   const canvas = document.getElementById('camera-canvas');
   const size = Math.min(video.videoWidth, video.videoHeight);
   const target = CONFIG.PHOTO_MAX_DIMENSION || 720;
@@ -939,11 +1316,13 @@ function capturePhoto() {
   ctx.drawImage(video, sx, sy, size, size, 0, 0, canvas.width, canvas.height);
 
   state.capturedPhoto = canvas.toDataURL('image/jpeg', CONFIG.PHOTO_QUALITY || 0.72);
-  state.capturedGps = { ...state.gps }; // bekukan titik GPS persis saat shutter ditekan
   state.captureTime = new Date();
+  if (state.cameraMode === 'attendance') {
+    state.capturedGps = { ...state.gps }; // bekukan titik GPS persis saat shutter ditekan
+    stopGpsWatch();
+  }
 
   stopCameraStream();
-  stopGpsWatch();
   clearInterval(state.timestampInterval);
 
   showPreview();
@@ -951,14 +1330,34 @@ function capturePhoto() {
 
 function showPreview() {
   document.getElementById('preview-image').src = state.capturedPhoto;
-  document.getElementById('preview-time').textContent = formatDateTimeWIB(state.captureTime);
-  document.getElementById('preview-address').textContent =
-    state.capturedGps.address || `${state.capturedGps.lat.toFixed(6)}, ${state.capturedGps.lng.toFixed(6)}`;
-  document.getElementById('preview-accuracy').textContent = `Akurasi GPS ±${state.capturedGps.accuracy} meter`;
+  const infoPanel = document.getElementById('preview-info');
+  const btnSubmitText = document.getElementById('btn-submit-text');
+  const btnRetake = document.getElementById('btn-retake');
+
+  if (state.cameraMode === 'profile') {
+    // Preview foto profil: tanpa info GPS/waktu (tidak relevan), label
+    // tombol disesuaikan supaya jelas ini menyimpan foto profil, BUKAN
+    // mengirim absensi.
+    infoPanel.classList.add('hidden');
+    btnSubmitText.textContent = 'Gunakan Foto Ini';
+    btnRetake.textContent = 'Ambil Ulang';
+  } else {
+    infoPanel.classList.remove('hidden');
+    document.getElementById('preview-time').textContent = formatDateTimeWIB(state.captureTime);
+    document.getElementById('preview-address').textContent =
+      state.capturedGps.address || `${state.capturedGps.lat.toFixed(6)}, ${state.capturedGps.lng.toFixed(6)}`;
+    document.getElementById('preview-accuracy').textContent = `Akurasi GPS ±${state.capturedGps.accuracy} meter`;
+    btnSubmitText.textContent = 'Kirim Absensi';
+    btnRetake.textContent = 'Ambil ulang';
+  }
   showScreen('screen-preview');
 }
 
 function retakePhoto() {
+  if (state.cameraMode === 'profile') {
+    startProfilePhotoCapture();
+    return;
+  }
   showScreen('screen-camera');
   document.getElementById('camera-mode-chip').textContent = state.currentType === 'masuk' ? 'ABSENSI MASUK' : 'ABSENSI KELUAR';
   resetGpsPanel();
@@ -974,6 +1373,41 @@ function retakePhoto() {
    absen TIDAK hilang: disimpan lalu dikirim otomatis
    begitu koneksi kembali).
    ============================================ */
+// Tombol "Kirim Absensi"/"Gunakan Foto Ini" di layar preview memicu alur
+// berbeda tergantung mode kamera saat ini — router kecil ini memastikan
+// klik yang sama selalu diarahkan ke logic yang benar.
+function onSubmitPreview() {
+  if (state.cameraMode === 'profile') {
+    saveProfilePhoto();
+  } else {
+    submitAttendance();
+  }
+}
+
+/* ============================================
+   SIMPAN FOTO PROFIL (mode profil)
+   ------------------------------------------------
+   Tidak ada request jaringan sama sekali — foto disimpan langsung ke
+   localStorage per-employeeId, lalu avatar di seluruh app diperbarui
+   SEKETIKA, dan user lanjut ke Home. Kalau localStorage penuh/gagal
+   (jarang, tapi mungkin di HP lawas), foto profil dianggap OPSIONAL demi
+   tidak mengunci user selamanya di layar kamera — user tetap bisa lanjut
+   pakai app dengan avatar inisial seperti biasa, dan sistem akan menawarkan
+   lagi di kesempatan berikutnya.
+   ============================================ */
+function saveProfilePhoto() {
+  const ok = setProfilePhoto(state.employee.id, state.capturedPhoto);
+  renderAvatar(state.employee);
+  clearInterval(state.timestampInterval);
+  state.cameraMode = 'attendance';
+  goToHome();
+  if (ok) {
+    showToast('Verifikasi identitas berhasil — foto profil telah disimpan');
+  } else {
+    showToast('Foto profil belum tersimpan di perangkat ini, silakan coba lagi dari halaman Profil', true);
+  }
+}
+
 async function submitAttendance() {
   if (state.submitting) return;
 

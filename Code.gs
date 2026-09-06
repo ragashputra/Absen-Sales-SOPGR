@@ -32,6 +32,10 @@
  *   waktu upload ke Drive kalau data jelas tidak lengkap).
  * - Semua error dibungkus rapi jadi respons JSON yang konsisten, supaya app
  *   frontend selalu tahu persis kenapa gagal (bukan cuma "error" generik).
+ * - Endpoint "addEmployee": karyawan baru bisa didaftarkan LANGSUNG dari PWA
+ *   (tombol "Tambah Nama Baru" di layar pilih nama) tanpa perlu buka Google
+ *   Sheet manual. ID baru dibuat otomatis, nama duplikat tidak akan membuat
+ *   baris ganda, dan aman dipanggil dua kali beruntun (idempotent by name).
  */
 
 const SHEET_KARYAWAN = 'Karyawan';
@@ -67,6 +71,8 @@ function doGet(e) {
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
+    const action = payload.action;
+    if (action === 'addEmployee') return jsonOut(addEmployee(payload.name, payload.branch));
     const result = recordAttendance(payload);
     return jsonOut(result);
   } catch (err) {
@@ -136,6 +142,75 @@ function getEmployees() {
     out.push({ id: String(id || i), name: String(name), branch: String(branch || '') });
   }
   return out;
+}
+
+/* ============================================
+   TAMBAH KARYAWAN BARU (dari PWA, tanpa perlu buka Sheet manual)
+   ------------------------------------------------
+   - Lock supaya dua orang daftar nyaris bersamaan tidak mendapat ID sama
+     atau saling menimpa baris.
+   - ID baru = ID numerik terbesar yang sudah ada + 1 (aman walau ada baris
+     lama yang ID-nya manual/tidak berurutan).
+   - Cek duplikat nama (case-insensitive, spasi berlebih diabaikan) supaya
+     tidak ada dua baris untuk orang yang sama karena double-tap atau typo
+     tambah dua kali; kalau sudah ada, kembalikan data yang sudah ada saja
+     (idempotent) alih-alih error.
+   - Cache "employees_v1" dihapus supaya endpoint "employees" berikutnya
+     langsung dapat data terbaru, bukan cache basi 6 menit.
+   ============================================ */
+function addEmployee(rawName, rawBranch) {
+  const name = String(rawName || '').trim().replace(/\s+/g, ' ');
+  if (!name) {
+    return { ok: false, error: 'Nama tidak boleh kosong' };
+  }
+  if (name.length > 100) {
+    return { ok: false, error: 'Nama terlalu panjang' };
+  }
+  const branch = String(rawBranch || '').trim();
+
+  const lock = LockService.getScriptLock();
+  const gotLock = lock.tryLock(10000);
+  if (!gotLock) {
+    return { ok: false, error: 'Sistem sedang sibuk, coba lagi sebentar' };
+  }
+
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_KARYAWAN);
+    if (!sheet) {
+      return { ok: false, error: 'Sheet "Karyawan" tidak ditemukan' };
+    }
+
+    const rows = sheet.getDataRange().getValues();
+    let maxId = 0;
+    const normalizedTarget = name.toLowerCase();
+    for (let i = 1; i < rows.length; i++) {
+      const [id, existingName] = rows[i];
+      const idNum = parseInt(id, 10);
+      if (!isNaN(idNum) && idNum > maxId) maxId = idNum;
+      if (existingName && String(existingName).trim().replace(/\s+/g, ' ').toLowerCase() === normalizedTarget) {
+        // Nama sudah ada — jangan buat duplikat, kembalikan data yang ada.
+        return {
+          ok: true,
+          duplicate: true,
+          employee: { id: String(id || i), name: String(existingName), branch: String(rows[i][2] || '') }
+        };
+      }
+    }
+
+    const newId = String(maxId + 1);
+    sheet.appendRow([newId, name, branch]);
+    invalidateEmployeeCache();
+
+    return { ok: true, duplicate: false, employee: { id: newId, name: name, branch: branch } };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function invalidateEmployeeCache() {
+  try { CacheService.getScriptCache().remove('employees_v1'); } catch (e) { /* abaikan */ }
 }
 
 /* ============================================

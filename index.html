@@ -75,15 +75,20 @@
 
     <div id="employee-empty" class="employee-empty hidden">
       <p>Belum ada data karyawan.</p>
-      <p class="employee-empty-sub">Hubungi admin untuk mendaftarkan nama kamu.</p>
+      <p class="employee-empty-sub">Tambahkan nama kamu lewat tombol di bawah.</p>
     </div>
+
+    <button class="add-employee-btn" id="btn-add-employee" type="button">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      <span>Tambah Nama Baru</span>
+    </button>
   </div>
 </div>
 
 <!-- ===== SCREEN: HOME / DASHBOARD ===== -->
 <div id="screen-home" class="screen">
   <header class="topbar-profile">
-    <div class="profile-avatar" id="home-employee-avatar">—</div>
+    <div class="profile-avatar" id="home-employee-avatar"><span id="home-employee-avatar-text">—</span></div>
     <div class="profile-block">
       <div class="profile-name" id="home-employee-name">—</div>
       <div class="profile-role" id="home-employee-branch">—</div>
@@ -202,6 +207,13 @@
         <div class="gps-address" id="gps-address">Menunggu lokasi akurat…</div>
       </div>
 
+      <!-- Tampil HANYA saat mode foto profil (state.cameraMode === 'profile')
+           — jelas tanpa GPS supaya tidak membingungkan, karena foto profil
+           memang tidak butuh lokasi sama sekali. -->
+      <div class="profile-photo-hint hidden" id="profile-photo-hint">
+        Posisikan wajah menghadap kamera dengan pencahayaan yang cukup dan latar yang jelas
+      </div>
+
       <div class="camera-distance-tip hidden" id="camera-distance-tip">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 9v4M12 16.5h.01" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"/><circle cx="12" cy="12" r="9.5" stroke="currentColor" stroke-width="2"/></svg>
         <span id="camera-distance-text">Terlalu jauh — dekatkan wajah ke kamera</span>
@@ -223,7 +235,10 @@
 <div id="screen-preview" class="screen screen-dark">
   <div class="preview-stage">
     <img id="preview-image" class="preview-image" alt="Preview foto absen">
-    <div class="preview-info">
+    <!-- Info GPS/waktu — disembunyikan otomatis saat mode foto profil lewat
+         class .hidden yang di-toggle dari JS (showPreview), karena foto
+         profil tidak punya data lokasi untuk ditampilkan. -->
+    <div class="preview-info" id="preview-info">
       <div class="preview-info-row">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <span id="preview-time">—</span>
@@ -307,7 +322,7 @@
 
   <div class="profile-body">
     <div class="profile-hero">
-      <div class="profile-hero-avatar" id="profile-avatar">—</div>
+      <div class="profile-hero-avatar" id="profile-avatar"><span id="profile-avatar-text">—</span></div>
       <div class="profile-hero-name" id="profile-name">—</div>
       <div class="profile-hero-branch" id="profile-branch">—</div>
     </div>
@@ -367,6 +382,25 @@
   </nav>
 </div>
 
+<!-- ===== MODAL: TAMBAH NAMA KARYAWAN BARU ===== -->
+<div id="add-employee-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-icon modal-icon-brass">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" stroke-width="2"/><path d="M19 8v6M22 11h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <h3 class="modal-title">Tambah Nama Baru</h3>
+    <p class="modal-message">Masukkan nama lengkap kamu. Nama akan langsung tersimpan dan bisa dipakai untuk absen hari ini juga.</p>
+    <div class="modal-input-field">
+      <input id="input-new-employee-name" type="text" placeholder="Nama lengkap" autocomplete="off" maxlength="100">
+    </div>
+    <p class="modal-input-error hidden" id="add-employee-error"></p>
+    <div class="modal-actions">
+      <button class="modal-btn-ghost" id="btn-cancel-add-employee">Batal</button>
+      <button class="modal-btn-solid" id="btn-confirm-add-employee">Simpan</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== TOAST ===== -->
 <div id="toast" class="toast hidden"></div>
 
@@ -377,6 +411,23 @@
     <h3 class="modal-title" id="modal-title"></h3>
     <p class="modal-message" id="modal-message"></p>
     <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<!-- ===== MODAL: WAJIB FOTO PROFIL (login pertama kali) =====
+     TIDAK ADA tombol "Batal"/tutup/klik-luar-overlay-untuk-close secara
+     sengaja — foto profil ini wajib diisi sebelum user bisa memakai app,
+     sesuai kebutuhan verifikasi identitas untuk absensi selfie. -->
+<div id="required-photo-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-icon modal-icon-brass">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M4 8a2 2 0 012-2h1.2l.8-1.6A1.5 1.5 0 019.34 3.5h5.32a1.5 1.5 0 011.34.9L17 6.7V6h1a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke="currentColor" stroke-width="2"/></svg>
+    </div>
+    <h3 class="modal-title">Verifikasi Identitas Diperlukan</h3>
+    <p class="modal-message">Untuk keamanan dan validitas data kehadiran, setiap akun wajib memiliki foto profil resmi. Foto ini akan digunakan sebagai referensi identitas pada setiap sesi absensi kamu. Proses ini hanya dilakukan satu kali.</p>
+    <div class="modal-actions">
+      <button class="modal-btn-solid" id="btn-start-profile-photo" style="flex:1">Ambil Foto Sekarang</button>
+    </div>
   </div>
 </div>
 

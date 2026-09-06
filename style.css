@@ -242,6 +242,22 @@ input { font-family: inherit; }
 .employee-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; color: var(--text-tertiary); padding: 40px; }
 .employee-empty-sub { font-size: 13px; }
 
+/* Tombol "Tambah Nama Baru" — ditaruh sebagai tindakan sekunder di bawah
+   daftar nama, bukan meniru gaya .employee-item, supaya user tidak salah
+   kira ini nama karyawan yang sudah terdaftar. Garis putus-putus (dashed)
+   dipilih khusus supaya secara visual langsung terbaca "buat baru/tambah",
+   bukan "pilih yang sudah ada". */
+.add-employee-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; padding: 13px; margin-top: 4px; flex-shrink: 0;
+  border: 1.5px dashed var(--surface-border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary); font-size: 13.5px; font-weight: 600;
+  background: transparent;
+  transition: transform 0.12s var(--ease-spring), border-color 0.15s ease, color 0.15s ease;
+}
+.add-employee-btn:active { transform: scale(0.98); border-color: var(--brass-500); color: var(--brass-500); }
+
 /* ============ HOME SCREEN ============ */
 .topbar-profile {
   display: flex; align-items: center; gap: 12px;
@@ -258,6 +274,15 @@ input { font-family: inherit; }
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 14px; letter-spacing: 0.01em;
   border: 2px solid var(--surface);
+  overflow: hidden; /* penting: membuat <img> foto profil ikut terpotong bulat */
+  position: relative;
+}
+/* Foto profil (kalau sudah pernah diambil) mengisi penuh lingkaran avatar,
+   menggantikan tampilan inisial 2-huruf. object-fit:cover memastikan foto
+   selfie (biasanya persegi dari capturePhoto) selalu pas tanpa gepeng. */
+.profile-avatar img, .profile-hero-avatar img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; border-radius: inherit;
 }
 
 .home-body {
@@ -559,6 +584,11 @@ input { font-family: inherit; }
   background: linear-gradient(to bottom, rgba(10,11,13,0.6) 0%, rgba(10,11,13,0) 20%, rgba(10,11,13,0) 62%, rgba(10,11,13,0.7) 100%);
 }
 .camera-top { display: flex; align-items: center; gap: 10px; }
+/* Menyembunyikan tombol close secara VISUAL saja (bukan display:none),
+   supaya lebar slotnya tetap dihitung di flex layout -> chip judul di
+   tengah tetap benar-benar center, simetris dengan .topbar-spacer di sisi
+   satunya. Dipakai saat mode foto profil (wajib, tidak boleh dibatalkan). */
+.invisible-slot { visibility: hidden; pointer-events: none; }
 .camera-mode-chip {
   flex: 1; text-align: center;
   font-size: 12px; font-weight: 700; letter-spacing: 0.05em;
@@ -588,6 +618,18 @@ input { font-family: inherit; }
   margin-top: 7px; letter-spacing: 0.01em;
 }
 .gps-address { font-size: 12px; color: var(--paper-200); margin-top: 5px; line-height: 1.4; }
+
+/* Muncul HANYA saat mode kamera = foto profil, menggantikan gps-panel yang
+   disembunyikan (foto profil tidak butuh lokasi). Style disamakan konsepnya
+   dengan gps-panel (kaca gelap blur) supaya terasa satu keluarga desain,
+   bukan tempelan yang beda gaya. */
+.profile-photo-hint {
+  margin-top: 14px; padding: 13px 15px; border-radius: var(--radius-md);
+  background: rgba(10,11,13,0.62); backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.09);
+  color: var(--paper-200); font-size: 12.5px; font-weight: 500; text-align: center;
+  line-height: 1.4;
+}
 
 /* ---- Peringatan jarak wajah (opsional, non-blocking): muncul mengambang
    di tengah frame HANYA saat wajah terdeteksi terlalu jauh dari kamera,
@@ -720,6 +762,7 @@ input { font-family: inherit; }
   box-shadow: 0 10px 26px -10px rgba(0,0,0,0.3);
   margin-bottom: 14px;
   animation: avatar-in 0.4s var(--ease-spring);
+  overflow: hidden; position: relative;
 }
 .profile-hero-name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .profile-hero-branch { font-size: 13px; color: var(--text-tertiary); margin-top: 4px; }
@@ -824,6 +867,8 @@ input { font-family: inherit; }
   box-shadow: 0 24px 60px -12px rgba(0,0,0,0.35);
 }
 .modal-icon { margin: 0 auto 16px; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface); }
+.modal-icon-brass { color: var(--brass-500); background: rgba(191,151,82,0.14); }
+[data-theme="dark"] .modal-icon-brass { color: var(--brass-300); }
 .modal-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.01em; }
 .modal-message { font-size: 13.5px; color: var(--text-tertiary); line-height: 1.55; margin-bottom: 22px; }
 .modal-actions { display: flex; gap: 10px; }
@@ -853,6 +898,39 @@ input { font-family: inherit; }
   box-shadow: 0 4px 14px -4px rgba(122,154,110,0.45), inset 0 1px 0 rgba(255,255,255,0.22);
 }
 .modal-btn-solid:active { background: var(--sage-600); }
+.modal-btn-solid:disabled, .modal-btn-ghost:disabled { opacity: 0.55; pointer-events: none; }
+
+/* Input teks di dalam modal (mis. "Tambah Nama Baru") — dibuat konsisten
+   dengan .search-field yang sudah ada di layar login supaya tidak terasa
+   seperti komponen asing. */
+.modal-input-field {
+  margin-bottom: 8px; text-align: left;
+}
+.modal-input-field input {
+  width: 100%; background: var(--surface); border-radius: var(--radius-md);
+  border: 1px solid var(--surface-border);
+  padding: 13px 14px; font-size: 15px; color: var(--text-primary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.modal-input-field input::placeholder { color: var(--text-tertiary); }
+.modal-input-field input:focus { border-color: var(--brass-500); box-shadow: 0 0 0 3px var(--brass-glow); }
+.modal-input-field input.input-error { border-color: #C1543D; }
+.modal-input-error {
+  font-size: 12.5px; color: #C1543D; text-align: left;
+  margin: -2px 0 12px 2px; min-height: 0;
+}
+.modal-input-error.hidden { display: none; }
+
+/* Badge kecil di item nama yang baru ditambahkan tapi belum sempat sinkron
+   ke server (masih offline). Dipasang di baris employee-branch supaya tidak
+   mengganggu layout item yang sudah ada. */
+.employee-pending-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--brass-500); font-weight: 600;
+}
+[data-theme="dark"] .employee-pending-badge { color: var(--brass-300); }
+.employee-pending-badge svg { flex-shrink: 0; }
+
 
 /* ============ SCROLLBAR ============ */
 ::-webkit-scrollbar { width: 0; height: 0; }
