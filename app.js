@@ -499,6 +499,55 @@ function updateClock() {
   const dateEl = document.getElementById('home-date');
   if (timeEl) timeEl.textContent = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: TZ });
   if (dateEl) dateEl.textContent = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
+  updateLoginGreeting(now);
+}
+
+/* ============================================
+   GREETING SAPAAN LOGIN (Selamat Pagi/Siang/Sore/Malam)
+   Berdasar jam WIB (TZ) real-time, bukan jam lokal device, supaya konsisten
+   dgn seluruh app walau device di-set timezone lain. Update otomatis tiap
+   detik lewat updateClock() -> tetap akurat walau layar dibiarkan terbuka
+   lama sampai lewat batas periode (mis. dari siang ke sore).
+   Batas waktu umum yg dipakai di Indonesia:
+   04:00–10:59 Pagi | 11:00–14:59 Siang | 15:00–18:29 Sore | 18:30–03:59 Malam
+   ============================================ */
+let lastGreetingPeriod = null;
+function getGreetingPeriod(hour, minute) {
+  const t = hour * 60 + minute; // menit sejak 00:00
+  if (t >= 4 * 60 && t < 11 * 60) return 'pagi';
+  if (t >= 11 * 60 && t < 15 * 60) return 'siang';
+  if (t >= 15 * 60 && t < 18 * 60 + 30) return 'sore';
+  return 'malam';
+}
+const GREETING_MAP = {
+  pagi:  { text: 'Selamat Pagi',  icon: '<svg viewBox="0 0 24 24" fill="none"><path d="M12 3v3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M18.6 6.4l-2 2M7.4 8.4l-2-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4.5 20.5c1.1-4.5 5-7.5 7.5-7.5s6.4 3 7.5 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 20.5h19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="12.5" r="3.3" stroke="currentColor" stroke-width="1.6"/></svg>' },
+  siang: { text: 'Selamat Siang', icon: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="11.5" r="4.6" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.8v2.3M19.9 4.3l-1.6 1.6M21.7 11.5h-2.3M4.6 11.5H2.3M5.7 5.9L4.1 4.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M8 20.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' },
+  sore:  { text: 'Selamat Sore',  icon: '<svg viewBox="0 0 24 24" fill="none"><path d="M12 4.2v4.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M17.8 8l-1.9 1.9M6.2 8l1.9 1.9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M6.3 16.2a5.7 5.7 0 0111.4 0" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M3 20.3h18M5.3 16.2h13.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' },
+  malam: { text: 'Selamat Malam', icon: '<svg viewBox="0 0 24 24" fill="none"><path d="M20 14.2a8.2 8.2 0 11-9.2-11 6.7 6.7 0 009.2 11z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M17 5.2l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6.6-1.4z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' }
+};
+function updateLoginGreeting(now) {
+  const textEl = document.getElementById('login-greeting-text');
+  const iconEl = document.getElementById('login-greeting-icon');
+  if (!textEl || !iconEl) return;
+
+  // Ambil jam/menit dalam TZ target (Asia/Jakarta), robust terhadap device
+  // dengan timezone berbeda: parsing lewat Intl, bukan getHours() lokal.
+  let hour, minute;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ }).formatToParts(now);
+    hour = Number(parts.find(p => p.type === 'hour').value);
+    minute = Number(parts.find(p => p.type === 'minute').value);
+  } catch (e) {
+    hour = now.getHours(); minute = now.getMinutes(); // fallback kalau Intl/timeZone gagal
+  }
+
+  const period = getGreetingPeriod(hour, minute);
+  if (period === lastGreetingPeriod) return; // hindari re-render DOM tiap detik kalau periode tidak berubah
+  lastGreetingPeriod = period;
+
+  const g = GREETING_MAP[period];
+  textEl.textContent = g.text;
+  iconEl.innerHTML = g.icon;
 }
 function formatDateTimeWIB(date) {
   return date.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'medium', timeZone: TZ }) + ' WIB';
