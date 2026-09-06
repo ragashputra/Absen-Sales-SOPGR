@@ -76,6 +76,9 @@
   --text-tertiary: var(--paper-ink);
   --nav-bg: rgba(247, 245, 241, 0.72);
   --nav-border: rgba(16,18,22,0.07);
+  --nav-pill-bg: rgba(255,255,255,0.6);
+  --nav-pill-border: rgba(255,255,255,0.75);
+  --nav-pill-shadow: 0 2px 8px rgba(16,18,22,0.10), inset 0 1px 0 rgba(255,255,255,0.75);
   --shadow-ambient: 0 0 70px rgba(0,0,0,0.18);
   --overlay-scrim: rgba(10,11,13,0.5);
   --theme-transition: background-color 0.4s var(--ease-swift), color 0.4s var(--ease-swift), border-color 0.4s var(--ease-swift), box-shadow 0.4s var(--ease-swift);
@@ -93,6 +96,9 @@
   --text-tertiary: #8A8578;
   --nav-bg: rgba(16, 18, 22, 0.66);
   --nav-border: rgba(255,255,255,0.08);
+  --nav-pill-bg: rgba(255,255,255,0.11);
+  --nav-pill-border: rgba(255,255,255,0.18);
+  --nav-pill-shadow: 0 2px 10px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.14);
   --shadow-ambient: 0 0 70px rgba(0,0,0,0.5);
   --overlay-scrim: rgba(0,0,0,0.65);
 }
@@ -205,17 +211,22 @@ input { font-family: inherit; }
     radial-gradient(120% 90% at 50% 0%, rgba(191,151,82,0.10) 0%, transparent 55%),
     var(--ink-950);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 16px;
+  gap: 18px;
   z-index: 999;
   animation: splash-out 0.5s var(--ease-out) 1.2s forwards;
 }
 .splash-mark { animation: splash-breathe 2.2s ease-in-out infinite; filter: drop-shadow(0 0 18px var(--brass-glow)); }
 .splash-text {
-  font-size: 21px; font-weight: 700; letter-spacing: 0.22em;
+  font-size: 27px; font-weight: 700; letter-spacing: 0.22em;
   color: var(--paper-100);
 }
 .splash-sub {
-  font-size: 12px; color: var(--ink-500); letter-spacing: 0.03em;
+  font-size: 14.5px; color: var(--ink-500); letter-spacing: 0.03em;
+  margin-top: -6px;
+}
+.splash-author {
+  font-size: 12.5px; font-weight: 500; color: var(--ink-500); opacity: 0.7;
+  letter-spacing: 0.02em; margin-top: -10px;
 }
 @keyframes splash-breathe {
   0%, 100% { transform: scale(1); opacity: 1; }
@@ -296,10 +307,16 @@ input { font-family: inherit; }
 .search-field input::placeholder { color: var(--text-tertiary); }
 
 .employee-list {
-  flex: 1; overflow-y: auto; margin-top: 18px;
+  flex: 1; overflow-y: auto; overflow-x: hidden; margin-top: 18px;
   display: flex; flex-direction: column; gap: 8px;
   padding-bottom: 20px;
+  padding-right: 6px; margin-right: -6px;
+  scrollbar-gutter: stable;
 }
+.employee-list::-webkit-scrollbar { width: 5px; }
+.employee-list::-webkit-scrollbar-track { background: transparent; }
+.employee-list::-webkit-scrollbar-thumb { background: var(--surface-strong); border-radius: 4px; }
+.employee-list::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
 .employee-item {
   display: flex; align-items: center; gap: 14px;
   padding: 14px 15px; border-radius: var(--radius-md);
@@ -459,8 +476,8 @@ input { font-family: inherit; }
 .recent-history-empty { text-align: center; color: var(--text-tertiary); font-size: 13px; padding: 30px 20px; }
 .recent-history-loading .recent-day-group { position: relative; overflow: hidden; }
 
-/* ============ BOTTOM NAV — premium glass tab bar dengan "pop-up notch"
-   (item aktif naik jadi lingkaran terangkat + lekukan di bar, ala referensi) ============ */
+/* ============ BOTTOM NAV — glass tab bar dengan pill "Liquid Glass" yang
+   meluncur di belakang tab aktif (gaya tab bar iOS terbaru) ============ */
 .bottom-nav {
   position: absolute; left: 14px; right: 14px; bottom: calc(var(--safe-bottom) + 14px);
   display: flex; align-items: center;
@@ -472,86 +489,81 @@ input { font-family: inherit; }
   border-radius: 26px;
   flex-shrink: 0;
   box-shadow: 0 12px 32px -12px rgba(0,0,0,0.22), 0 1px 0 rgba(255,255,255,0.05) inset;
-  overflow: visible; /* supaya lingkaran pop-up boleh nongol keluar dari batas atas bar */
+  overflow: visible;
 }
 
-/* Lekukan (notch) di badan bar, tepat di belakang lingkaran yang nongol.
-   Dibuat dari radial-gradient "dent" yang meniru bayangan cekungan halus —
-   pendekatan ini jauh lebih stabil lintas ukuran layar dibanding clip-path
-   SVG statis, karena otomatis ikut geser lewat transform yang sama dengan
-   .nav-indicator (tanpa perlu hitung ulang path tiap resize). Lingkaran
-   terangkatnya sendiri TIDAK digambar di sini — itu datang langsung dari
-   .nav-item-icon milik item yang sedang aktif, supaya cuma ada satu sumber
-   kebenaran render (menghindari dua lingkaran dobel/nggak sinkron). */
+/* ============================================
+   NAV INDICATOR — pill "Liquid Glass" (gaya tab bar iOS terbaru): kapsul kaca
+   buram yang meluncur & melebar/menyempit mengikuti lebar tab yang dipilih.
+   Posisi & lebar-nya di-set lewat JS (app.js: positionNavIndicators) memakai
+   pengukuran DOM asli (getBoundingClientRect), BUKAN pembagian persentase
+   statis — supaya tetap presisi walau FAB kamera di tengah bar lebarnya beda
+   sendiri dari tab yang lain. Dua lapis blur (bar + pill) menghasilkan efek
+   kaca berlapis yang jadi ciri khas Liquid Glass.
+   ============================================ */
 .nav-indicator {
   position: absolute;
-  top: -14px; height: 54px;
-  left: 8px;
-  width: calc((100% - 16px) / 5);
-  display: flex; align-items: flex-start; justify-content: center;
-  transition: transform 0.4s var(--ease-spring);
+  top: 6px; bottom: 6px; left: 0;
+  border-radius: 17px;
+  background: var(--nav-pill-bg);
+  border: 1px solid var(--nav-pill-border);
+  box-shadow: var(--nav-pill-shadow);
+  backdrop-filter: blur(18px) saturate(1.5);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  transition: transform 0.42s var(--ease-spring), width 0.42s var(--ease-spring);
+  will-change: transform;
   pointer-events: none;
   z-index: 0;
 }
-.nav-indicator::before {
-  /* Dudukan cekung di badan bar — melebar tipis di bawah lingkaran supaya
-     terlihat seperti bar "melekuk" menampung lingkaran, persis referensi. */
-  content: '';
-  position: absolute;
-  top: 14px; left: 50%; transform: translateX(-50%);
-  width: 60px; height: 40px;
-  background: radial-gradient(circle at 50% 0%, var(--bg) 0%, var(--bg) 52%, transparent 74%);
-  opacity: 0.9;
-}
+/* Dipasang sesaat oleh JS pas posisi awal/resize di-set ulang, supaya
+   perpindahannya SNAP instan (tidak ikut animasi geser dari pojok). */
+.nav-indicator.no-anim { transition: none; }
 
 .nav-item {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  color: var(--text-tertiary); font-size: 10px; font-weight: 600;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  color: var(--text-tertiary); font-size: 11.5px; font-weight: 600;
   padding: 6px 4px; letter-spacing: 0.005em;
   border-radius: 16px;
   position: relative; z-index: 1;
   flex: 1;
   min-width: 0;
-  height: 54px;
+  height: 56px;
   transition: color 0.18s ease, transform 0.15s var(--ease-spring);
 }
 .nav-item-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px;
+  width: 28px; height: 28px;
   border-radius: 50%;
   transition: transform 0.22s var(--ease-spring), color 0.18s ease;
 }
 .nav-item svg { display: block; transition: transform 0.22s var(--ease-spring), color 0.18s ease; }
 .nav-item span:last-child { line-height: 1; white-space: nowrap; transition: color 0.18s ease; }
 
-/* Model "Shopee": item aktif TIDAK naik/berubah bentuk — cuma warnanya yang
-   berpindah ke brass (ikon + label sekaligus). Simpel, stabil, tidak ada
-   lompatan tata-letak sama sekali antar tab. */
+/* Item aktif: warnanya berpindah ke brass DAN duduk di atas pill kaca yang
+   meluncur (.nav-indicator) — persis gaya tab bar iOS terbaru. */
 .nav-item.active { color: var(--brass-600); }
 [data-theme="dark"] .nav-item.active { color: var(--brass-400); }
 .nav-item.active .nav-item-icon svg { color: inherit; }
 .nav-item:active { transform: scale(0.92); }
 
-/* Sembunyikan notch cekung — tidak dipakai lagi pada model warna-saja ini. */
-.nav-indicator { display: none; }
-.nav-indicator.on-fab::before { opacity: 0; }
-
-/* Tombol Keluar: MERAH — relevan menandakan aksi keluar/logout, dan tegas
-   beda dari item nav lain. Warna merah yang sama dipakai persis di light &
-   dark mode -> tidak pernah pudar/nge-blend ke background gelap. */
+/* Tombol Keluar: KUNING/AMBER — beda dari warna aksi destruktif (merah,
+   dipakai khusus utk "Hapus Akun" yang permanen). Keluar cuma ganti pengguna
+   /logout biasa, jadi dikasih warna peringatan ringan (amber), bukan bahaya.
+   Warna disamakan skalanya persis dengan --amber-500 yang sudah dipakai di
+   tempat lain (mis. panel GPS "mencari sinyal"), supaya konsisten satu palet. */
 .nav-item-logout,
-.nav-item-logout .nav-item-icon svg { color: var(--red-500); }
+.nav-item-logout .nav-item-icon svg { color: var(--amber-500); }
 [data-theme="dark"] .nav-item-logout,
-[data-theme="dark"] .nav-item-logout .nav-item-icon svg { color: #E08A76; }
+[data-theme="dark"] .nav-item-logout .nav-item-icon svg { color: var(--brass-300); }
 .nav-item-logout.active,
-.nav-item-logout.active .nav-item-icon svg { color: var(--red-600); }
+.nav-item-logout.active .nav-item-icon svg { color: #B8862E; }
 [data-theme="dark"] .nav-item-logout.active,
-[data-theme="dark"] .nav-item-logout.active .nav-item-icon svg { color: #E8A18F; }
+[data-theme="dark"] .nav-item-logout.active .nav-item-icon svg { color: #F0D9A0; }
 
 /* ============ FAB — kamera premium, lingkaran bulat sempurna, ikon besar ============ */
 .nav-fab {
   position: relative;
-  width: 60px; height: 60px; min-width: 60px; max-width: 60px; border-radius: 50%;
+  width: 64px; height: 64px; min-width: 64px; max-width: 64px; border-radius: 50%;
   aspect-ratio: 1 / 1;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(155deg, var(--brass-300), var(--brass-600));
@@ -567,7 +579,7 @@ input { font-family: inherit; }
   transform: translateY(-10px);
   animation: fab-glow-pulse 2.6s ease-in-out infinite;
 }
-.nav-fab svg { position: relative; z-index: 2; width: 30px; height: 30px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15)); }
+.nav-fab svg { position: relative; z-index: 2; width: 34px; height: 34px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.15)); }
 /* Cincin cahaya berdenyut halus di belakang FAB — kesan "kamera menyala".
    Warnanya dibedakan per tema supaya kontrasnya selalu kuat: di light mode
    brass pucat nyaris tak kelihatan di atas background terang, jadi dipakai
@@ -903,12 +915,24 @@ input { font-family: inherit; }
   position: absolute; top: 5px; bottom: 5px; left: 5px;
   width: calc((100% - 10px) / 3);
   background: var(--bg-elevated);
+  border: 1px solid transparent;
   border-radius: 13px;
   box-shadow: 0 3px 10px rgba(0,0,0,0.12), 0 1px 0 rgba(255,255,255,0.4) inset;
   transition: transform 0.32s var(--ease-spring);
   z-index: 0;
 }
-[data-theme="dark"] .theme-switch-indicator { box-shadow: 0 3px 10px rgba(0,0,0,0.35); }
+/* PENTING: di dark mode, --bg-elevated (ink-900) sebenarnya lebih GELAP dari
+   --surface (ink-850) yang dipakai sebagai warna track di atas — jadi kalau
+   dipakai apa adanya, pill indicator ini malah lebih gelap dari track-nya
+   sendiri dan nyaris tidak kelihatan posisinya. Di sini dipakai
+   --surface-strong (ink-800, lebih TERANG dari track) supaya hubungan
+   kontrasnya sama persis seperti di light mode: pill selalu lebih terang
+   & "terangkat" dibanding track-nya. */
+[data-theme="dark"] .theme-switch-indicator {
+  background: var(--surface-strong);
+  border-color: rgba(255,255,255,0.08);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.06) inset;
+}
 .theme-switch-opt {
   position: relative; z-index: 1; flex: 1;
   display: flex; flex-direction: column; align-items: center; gap: 5px;
@@ -923,27 +947,36 @@ input { font-family: inherit; }
 .theme-switch-opt:active { transform: scale(0.94); }
 
 .profile-logout-btn {
-  /* Sama seperti tombol Keluar di bottom nav: MERAH — relevan menandakan
-     aksi keluar, kontras tetap jelas terbaca di light maupun dark mode. */
+  /* KUNING/AMBER — dibedakan sengaja dari "Hapus Akun" (merah, permanen) di
+     bawahnya: Keluar/Ganti Pengguna cuma logout biasa, bukan aksi destruktif,
+     jadi warnanya peringatan ringan saja, bukan bahaya. */
   display: flex; align-items: center; gap: 12px;
   width: 100%; padding: 15px 16px; border-radius: var(--radius-md);
-  background: var(--surface); border: 1px solid rgba(193,84,61,0.28);
-  color: var(--red-500); font-size: 14.5px; font-weight: 700;
+  background: var(--surface); border: 1px solid rgba(217,164,65,0.32);
+  color: var(--amber-500); font-size: 14.5px; font-weight: 700;
   transition: transform 0.13s var(--ease-spring), background 0.15s ease;
 }
-[data-theme="dark"] .profile-logout-btn { color: #E08A76; border-color: rgba(193,84,61,0.38); }
-.profile-logout-btn:active { transform: scale(0.955); background: rgba(193,84,61,0.12); }
+[data-theme="dark"] .profile-logout-btn { color: var(--brass-300); border-color: rgba(217,164,65,0.4); }
+.profile-logout-btn:active { transform: scale(0.955); background: rgba(217,164,65,0.14); }
 .profile-logout-icon {
-  /* Border sendiri di kotak icon-nya (bukan cuma background transparan
-     lembut) supaya bentuknya tegas kelihatan, bukan menyatu blur dengan
-     latar tombol. Warna & opacity border disamakan skalanya dengan border
-     tombol induknya biar terasa satu kesatuan desain, bukan tempelan. */
+  /* Style dasar (ukuran & bentuk) dipakai BARENG oleh kotak icon tombol
+     Keluar dan tombol Hapus Akun — warnanya di-override terpisah di bawah
+     per tombol (lihat .profile-logout-btn .profile-logout-icon), supaya
+     "Hapus Akun" tetap merah (aksi permanen) sementara "Keluar" jadi kuning. */
   width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(193,84,61,0.16);
   border: 1px solid rgba(193,84,61,0.32);
 }
 [data-theme="dark"] .profile-logout-icon { border-color: rgba(193,84,61,0.42); }
+
+/* Kotak icon tombol Keluar/Ganti Pengguna: KUNING/AMBER, override warna
+   dari default merah di atas (yang tetap berlaku utk kotak icon Hapus Akun). */
+.profile-logout-btn .profile-logout-icon {
+  background: rgba(217,164,65,0.18);
+  border: 1px solid rgba(217,164,65,0.36);
+}
+[data-theme="dark"] .profile-logout-btn .profile-logout-icon { border-color: rgba(217,164,65,0.46); }
 /* ---- Zona Berbahaya: dipisahkan visual dari "Keluar" biasa —
    background merah lebih pekat & solid, supaya level risikonya jelas beda
    (Keluar = bisa masuk lagi kapan saja; Hapus Akun = permanen). ---- */

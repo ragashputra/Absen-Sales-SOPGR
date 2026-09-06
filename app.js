@@ -25,7 +25,8 @@ const state = {
   captureTime: null,
   todayStatus: { masuk: null, keluar: null },
   timestampInterval: null,
-  submitting: false
+  submitting: false,
+  currentNavTarget: null // 'home' | 'profile' | 'history' — dipakai reposisi pill nav pas resize/rotate
 };
 
 const STORAGE_KEY = 'absen_employee';
@@ -379,15 +380,17 @@ function closeAbsenSheet() {
   }, 260); // cocok dengan durasi transform sheet-box (0.26s)
 }
 
-function setBottomNavActive(target) {
+const NAV_PILL_INSET = 4; // px — pill sedikit lebih ramping dari kotak tap target aslinya, kesan kapsul kaca yang lebih rapi
+
+function setBottomNavActive(target, options) {
   // target: 'home' | 'history' | 'profile' — mengatur SEMUA salinan nav
   // (muncul di screen-home, screen-history, screen-profile) sekaligus,
   // termasuk menggeser indicator pill aktif ke posisi tab yang benar.
   // Catatan: "Keluar" BUKAN target navigasi (dia cuma tombol aksi/modal),
   // jadi tidak pernah ikut dihitung di sini — indicator tidak akan pernah
   // nyasar ke slot Keluar.
-  const indexByTarget = { home: 0, profile: 1, history: 3 };
-  const activeIndex = indexByTarget[target] ?? 0;
+  const animate = !options || options.animate !== false;
+  state.currentNavTarget = target;
 
   document.querySelectorAll('.nav-item:not(.nav-item-logout)').forEach(el => {
     const isHome = el.id.startsWith('nav-home');
@@ -400,11 +403,54 @@ function setBottomNavActive(target) {
     );
   });
 
-  // Setiap layar punya nav-indicator sendiri (satu per bottom-nav), geser semuanya
-  document.querySelectorAll('.nav-indicator').forEach(el => {
-    el.style.transform = `translateX(${activeIndex * 100}%)`;
+  // Posisi pill DITUNDA ke frame berikutnya (bukan dihitung langsung di sini).
+  // Kenapa: fungsi ini sering dipanggil SEBELUM showScreen() (mis. di klik
+  // tab Riwayat) — kalau posisi diukur sekarang juga, layar tujuan mungkin
+  // masih tersembunyi (display:none) sehingga getBoundingClientRect-nya 0.
+  // Menunggu 1 frame memastikan showScreen() yang menyusul sudah pasti
+  // selesai jalan lebih dulu, jadi pengukuran selalu akurat kapan pun urutan
+  // pemanggilannya.
+  requestAnimationFrame(() => positionNavIndicators(target, animate));
+}
+
+// Menggeser & melebarkan pill kaca (.nav-indicator) di SETIAP salinan bottom-nav
+// supaya persis menutupi tab yang sedang aktif — diukur langsung dari DOM
+// (bukan hitungan persentase slot statis), supaya tetap presisi walau FAB
+// kamera di tengah bar lebarnya beda sendiri dari nav-item yang lain.
+function positionNavIndicators(target, animate) {
+  const selector = target === 'home' ? '[id^="nav-home"]'
+    : target === 'profile' ? '[id^="nav-profile"]'
+    : '[id^="nav-history"]';
+
+  document.querySelectorAll('.bottom-nav').forEach(nav => {
+    const indicator = nav.querySelector('.nav-indicator');
+    const activeItem = nav.querySelector(selector);
+    if (!indicator || !activeItem) return;
+    // Lewati bar yang layarnya sedang tidak terlihat — rect-nya pasti 0 kalau
+    // dipaksa dipakai, malah bikin pill "melompat" ke pojok kiri atas.
+    if (activeItem.offsetParent === null) return;
+
+    const navRect = nav.getBoundingClientRect();
+    const itemRect = activeItem.getBoundingClientRect();
+    const x = (itemRect.left - navRect.left) + NAV_PILL_INSET;
+    const w = itemRect.width - NAV_PILL_INSET * 2;
+
+    if (!animate) indicator.classList.add('no-anim');
+    indicator.style.width = `${w}px`;
+    indicator.style.transform = `translateX(${x}px)`;
+    if (!animate) {
+      void indicator.offsetWidth; // paksa reflow supaya class no-anim benar2 berlaku dulu
+      requestAnimationFrame(() => indicator.classList.remove('no-anim'));
+    }
   });
 }
+
+// Kalau layar diputar / lebar viewport berubah, ukuran & posisi tab ikut
+// berubah — reposisikan pill tanpa animasi (snap instan) supaya tidak
+// nyangkut di posisi/lebar lama.
+window.addEventListener('resize', () => {
+  if (state.currentNavTarget) positionNavIndicators(state.currentNavTarget, false);
+});
 
 function attachConnectivityListeners() {
   window.addEventListener('online', () => {
@@ -892,7 +938,7 @@ function selectEmployee(emp) {
   document.getElementById('profile-name').textContent = emp.name;
   document.getElementById('profile-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
   renderAvatar(emp);
-  setBottomNavActive('home');
+  setBottomNavActive('home', { animate: false });
   showScreen('screen-home');
   refreshHome();
   flushPendingQueue();
