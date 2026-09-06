@@ -1255,8 +1255,8 @@ input { font-family: inherit; }
 .history-type { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 100px; letter-spacing: 0.01em; }
 .history-type.masuk { background: rgba(122,154,110,0.18); color: var(--sage-600); }
 .history-type.keluar { background: rgba(191,151,82,0.2); color: var(--brass-600); }
-.history-date { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
-.history-addr { font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-date { font-size: 11px; color: var(--text-tertiary); margin-top: 5px; }
+.history-addr { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-time { font-family: var(--font-mono); font-size: 13px; font-weight: 600; flex-shrink: 0; }
 
 /* Badge status telat/tepat waktu — dipakai di 3 tempat: riwayat ringkas Home

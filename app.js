@@ -2640,8 +2640,8 @@ function renderHistory(list) {
         <div class="history-top-row">
           <span class="history-type ${item.type === 'Masuk' ? 'masuk' : 'keluar'}">${item.type}</span>
           ${item.type === 'Masuk' ? renderStatusBadge(item.status) : ''}
-          <span class="history-date">${formatHistoryDate(item.date)}</span>
         </div>
+        <div class="history-date">${formatHistoryDate(item.date)}</div>
         <div class="history-addr">${escapeHtml(item.address || '')}</div>
       </div>
       <div class="history-time">${safeTimeText(item.time)}</div>
