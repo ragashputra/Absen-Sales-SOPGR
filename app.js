@@ -37,16 +37,28 @@ const HOME_CACHE_PREFIX = 'absen_home_cache_';
 const HISTORY_CACHE_PREFIX = 'absen_history_cache_';
 const PROFILE_PHOTO_PREFIX = 'absen_profile_photo_'; // + employeeId -> base64 dataURL (cache lokal, sumber utama tetap server)
 const PROFILE_PHOTO_QUEUE_KEY = 'absen_pending_profile_photos'; // antrian foto profil yang gagal/belum sempat ke-upload ke server
+const PROFILE_PHOTO_DELETED_PREFIX = 'absen_profile_photo_deleted_'; // + employeeId -> '1' selama penghapusan belum dikonfirmasi server, biar tidak "muncul lagi" dari cache employees lama
+const PROFILE_PHOTO_DELETE_QUEUE_KEY = 'absen_pending_profile_photo_deletes'; // antrian employeeId yang minta hapus foto profil tapi gagal/belum sempat sampai ke server
 
 /* ============================================
    FOTO PROFIL — disimpan per-employeeId di localStorage supaya kalau ganti
    pengguna di HP yang sama, foto tidak pernah tertukar/bocor ke akun lain.
    ============================================ */
+function isProfilePhotoDeletedLocally(employeeId) {
+  try { return localStorage.getItem(PROFILE_PHOTO_DELETED_PREFIX + employeeId) === '1'; }
+  catch (e) { return false; }
+}
 function getProfilePhoto(employeeId, employee) {
   try {
     const cached = localStorage.getItem(PROFILE_PHOTO_PREFIX + employeeId);
     if (cached) return cached;
   } catch (e) { /* localStorage disabled — lanjut fallback ke server di bawah */ }
+
+  // Baru saja dihapus di perangkat ini tapi server belum sempat/berhasil
+  // dikonfirmasi (mis. offline) — JANGAN fallback ke profilePhotoUrl lama
+  // dari respons "employees"/"home", supaya foto yang sudah diminta hapus
+  // tidak "muncul lagi" gara-gara data server belum sinkron.
+  if (isProfilePhotoDeletedLocally(employeeId)) return null;
 
   // Tidak ada cache lokal (mis. device/browser baru) — fallback ke URL foto
   // profil dari server, kalau data karyawan yang diberikan memuatnya.
@@ -60,8 +72,16 @@ function getProfilePhoto(employeeId, employee) {
   return null;
 }
 function setProfilePhoto(employeeId, dataUrl) {
+  clearProfilePhotoDeletedFlag(employeeId); // foto baru diambil -> batalkan status "terhapus" sebelumnya kalau ada
   try { localStorage.setItem(PROFILE_PHOTO_PREFIX + employeeId, dataUrl); return true; }
   catch (e) { return false; } // storage penuh/disabled — ditangani di pemanggil
+}
+function removeLocalProfilePhoto(employeeId) {
+  try { localStorage.removeItem(PROFILE_PHOTO_PREFIX + employeeId); } catch (e) { /* abaikan */ }
+  try { localStorage.setItem(PROFILE_PHOTO_DELETED_PREFIX + employeeId, '1'); } catch (e) { /* abaikan */ }
+}
+function clearProfilePhotoDeletedFlag(employeeId) {
+  try { localStorage.removeItem(PROFILE_PHOTO_DELETED_PREFIX + employeeId); } catch (e) { /* abaikan */ }
 }
 
 /* ============================================
@@ -148,6 +168,7 @@ async function init() {
   if (navigator.onLine) {
     flushPendingEmployeeQueue();
     flushPendingProfilePhotoQueue();
+    flushPendingProfilePhotoDeleteQueue();
   }
 
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -182,6 +203,8 @@ function attachEventListeners() {
   document.getElementById('btn-submit').addEventListener('click', onSubmitPreview);
   document.getElementById('btn-back-home').addEventListener('click', goToHome);
   document.getElementById('btn-start-profile-photo').addEventListener('click', startProfilePhotoCapture);
+  document.getElementById('btn-edit-profile-photo').addEventListener('click', onEditProfilePhotoClick);
+  document.getElementById('btn-remove-profile-photo').addEventListener('click', onRemoveProfilePhotoClick);
 
   // Bottom nav — ada 3 salinan (di screen-home, screen-history & screen-profile)
   // supaya nav selalu tampil di setiap layar; semuanya terhubung ke fungsi yang sama.
@@ -356,6 +379,7 @@ function attachConnectivityListeners() {
     flushPendingQueue();
     flushPendingEmployeeQueue();
     flushPendingProfilePhotoQueue();
+    flushPendingProfilePhotoDeleteQueue();
   });
   window.addEventListener('offline', () => {
     showToast('Kamu sedang offline. Absensi akan dikirim otomatis saat online.', true);
@@ -366,6 +390,7 @@ function attachConnectivityListeners() {
       flushPendingQueue();
       flushPendingEmployeeQueue();
       flushPendingProfilePhotoQueue();
+      flushPendingProfilePhotoDeleteQueue();
     }
   });
 }
@@ -686,6 +711,50 @@ function replaceLocalEmployeeId(localId, newEmp) {
     state.employee = newEmp;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(newEmp));
   }
+
+  // PENTING (fix bug foto profil hilang): karyawan yang ditambah offline
+  // sempat dapat foto profil WAJIB dengan employeeId lokal sementara
+  // ("local_..."). Kalau ID lokal itu tidak ikut dipindah ke ID asli di
+  // sini, cache foto lokal & antrian upload (PROFILE_PHOTO_QUEUE_KEY) jadi
+  // "yatim" — nempel selamanya di ID yang sudah tidak dipakai lagi, tidak
+  // pernah ketemu baris di sheet Karyawan (ID asli beda), dan tidak pernah
+  // ke-retry dengan ID yang benar. Foto pun terlihat "hilang".
+  migrateProfilePhotoLocalId(localId, newEmp.id);
+}
+
+// Memindahkan SEMUA jejak lokal foto profil (cache tampilan + antrian upload
+// yang masih pending) dari ID sementara ke ID permanen dari server, supaya
+// upload background bisa lanjut jalan dengan ID yang benar-benar ada di sheet.
+function migrateProfilePhotoLocalId(oldId, newId) {
+  if (!oldId || !newId || oldId === newId) return;
+
+  // 1) Cache tampilan lokal (dataURL) — pindahkan kuncinya.
+  try {
+    const cachedPhoto = localStorage.getItem(PROFILE_PHOTO_PREFIX + oldId);
+    if (cachedPhoto) {
+      localStorage.setItem(PROFILE_PHOTO_PREFIX + newId, cachedPhoto);
+      localStorage.removeItem(PROFILE_PHOTO_PREFIX + oldId);
+    }
+    if (isProfilePhotoDeletedLocally(oldId)) {
+      localStorage.setItem(PROFILE_PHOTO_DELETED_PREFIX + newId, '1');
+      localStorage.removeItem(PROFILE_PHOTO_DELETED_PREFIX + oldId);
+    }
+  } catch (e) { /* storage disabled — abaikan, tidak fatal */ }
+
+  // 2) Antrian upload yang masih pending — ganti employeeId-nya, JANGAN
+  // dihapus, supaya begitu online foto tetap otomatis ke-upload ke baris
+  // sheet yang benar (bukan hilang begitu saja).
+  const queue = readProfilePhotoQueue();
+  let changed = false;
+  const migrated = queue.map(item => {
+    if (item.employeeId === oldId) { changed = true; return { ...item, employeeId: newId }; }
+    return item;
+  });
+  if (changed) {
+    writeProfilePhotoQueue(migrated);
+    // Langsung coba kirim sekarang kalau online — tidak perlu nunggu trigger lain.
+    if (navigator.onLine) flushPendingProfilePhotoQueue();
+  }
 }
 
 function initials(name) {
@@ -720,6 +789,13 @@ function renderAvatar(emp) {
     const span = document.getElementById(textEl);
     if (span) span.textContent = emp ? initials(emp.name) : '—';
   });
+
+  // Tombol hapus foto di layar Profil: HANYA tampil kalau foto profil
+  // memang SUDAH terpasang. Untuk akun yang belum pernah punya foto sama
+  // sekali (masih inisial), tombol ini tetap disembunyikan — sesuai
+  // permintaan: yang belum ada fotonya tidak dikasih opsi hapus.
+  const removeBtn = document.getElementById('btn-remove-profile-photo');
+  if (removeBtn) removeBtn.classList.toggle('hidden', !photo);
 }
 
 function selectEmployee(emp) {
@@ -886,6 +962,148 @@ async function openCamera(type) {
    ============================================ */
 function requireProfilePhoto() {
   document.getElementById('required-photo-overlay').classList.remove('hidden');
+}
+
+// Tombol kamera kecil di avatar layar Profil: dipakai baik untuk mengambil
+// foto pertama kali maupun mengganti foto yang sudah ada — keduanya reuse
+// startProfilePhotoCapture() yang sama (upload akan menimpa foto lama).
+function onEditProfilePhotoClick() {
+  if (!state.employee) return;
+  startProfilePhotoCapture();
+}
+
+/* ============================================
+   HAPUS FOTO PROFIL
+   ------------------------------------------------
+   Cuma bisa dipicu kalau foto memang sudah ada (tombolnya disembunyikan
+   selain itu, lihat renderAvatar). Alur:
+   1. Konfirmasi dulu (aksi destruktif, foto asli di Drive ikut terhapus).
+   2. Optimistic: hapus dari tampilan + cache lokal + antrian pending duluan,
+      supaya user langsung lihat hasilnya tanpa nunggu network.
+   3. Kalau online & backend siap: minta server hapus file Drive & kosongkan
+      kolom FotoProfilURL. Kalau gagal/offline, foto tetap terhapus di HP
+      ini (privasi user diutamakan), tapi dicoba lagi otomatis biar server
+      ikut sinkron begitu koneksi kembali.
+   ============================================ */
+function onRemoveProfilePhotoClick() {
+  if (!state.employee) return;
+  const emp = state.employee;
+  if (!getProfilePhoto(emp.id, emp)) return; // jaga-jaga, seharusnya tombol sudah tersembunyi
+
+  showModal({
+    icon: 'warn',
+    title: 'Hapus foto profil?',
+    message: 'Foto profil kamu akan dihapus dari perangkat ini dan dari server. Kamu bisa mengambil foto baru kapan saja setelahnya.',
+    actions: [
+      { label: 'Batal', style: 'ghost' },
+      { label: 'Hapus', style: 'solid', onClick: () => deleteProfilePhoto(emp) }
+    ]
+  });
+}
+
+function deleteProfilePhoto(emp) {
+  const employeeId = emp.id;
+
+  // 1) Optimistic lokal — langsung hilang dari layar & tidak akan tampil
+  // lagi biar user tidak nunggu, tanpa peduli hasil server.
+  removeLocalProfilePhoto(employeeId);
+  emp.profilePhotoUrl = '';
+  const listedEmp = state.employees.find(e => e.id === employeeId);
+  if (listedEmp) listedEmp.profilePhotoUrl = '';
+  // Foto yang belum sempat ke-upload (masih di antrian) juga dibuang —
+  // tidak ada gunanya lagi diupload kalau user baru saja memintanya dihapus.
+  const remainingQueue = readProfilePhotoQueue().filter(item => item.employeeId !== employeeId);
+  writeProfilePhotoQueue(remainingQueue);
+
+  renderAvatar(state.employee);
+  showToast('Foto profil dihapus.');
+
+  // 2) Hapus di server juga (foto asli + kolom sheet), diam-diam di
+  // belakang layar. Kalau gagal, foto tetap terhapus di HP ini — tidak
+  // memblokir user, karena yang terpenting privasinya di perangkat sendiri
+  // sudah terjaga; sinkronisasi server menyusul kapan saja koneksi ada.
+  requestServerDeleteProfilePhoto(employeeId);
+}
+
+function readProfilePhotoDeleteQueue() {
+  try { return JSON.parse(localStorage.getItem(PROFILE_PHOTO_DELETE_QUEUE_KEY)) || []; }
+  catch (e) { return []; }
+}
+function writeProfilePhotoDeleteQueue(queue) {
+  try { localStorage.setItem(PROFILE_PHOTO_DELETE_QUEUE_KEY, JSON.stringify(queue)); }
+  catch (e) { /* storage penuh/disabled — jarang, isinya cuma daftar ID */ }
+}
+
+// Meminta server menghapus foto (file Drive + kolom sheet). Kalau gagal
+// (offline/timeout), permintaan masuk antrian PROFILE_PHOTO_DELETE_QUEUE_KEY
+// dan otomatis dicoba lagi lewat flushPendingProfilePhotoDeleteQueue() —
+// disamakan polanya dengan antrian upload/tambah-karyawan yang sudah ada,
+// supaya konsisten dan tidak ada permintaan hapus yang diam-diam hilang.
+async function requestServerDeleteProfilePhoto(employeeId) {
+  if (!isBackendConfigured() || !navigator.onLine) {
+    queueProfilePhotoDelete(employeeId);
+    return;
+  }
+  try {
+    const data = await fetchJsonWithTimeout(
+      `${CONFIG.APPS_SCRIPT_URL}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'deleteProfilePhoto', employeeId })
+      },
+      15000
+    );
+    if (data.ok) {
+      clearProfilePhotoDeletedFlag(employeeId); // server sudah konfirmasi -> aman, tidak perlu ditahan lagi
+      const remaining = readProfilePhotoDeleteQueue().filter(id => id !== employeeId);
+      writeProfilePhotoDeleteQueue(remaining);
+    } else {
+      queueProfilePhotoDelete(employeeId);
+    }
+  } catch (e) {
+    queueProfilePhotoDelete(employeeId); // gagal jaringan -> coba lagi nanti otomatis
+  }
+}
+
+function queueProfilePhotoDelete(employeeId) {
+  const queue = readProfilePhotoDeleteQueue();
+  if (!queue.includes(employeeId)) queue.push(employeeId);
+  writeProfilePhotoDeleteQueue(queue);
+}
+
+let profilePhotoDeleteFlushInProgress = false;
+async function flushPendingProfilePhotoDeleteQueue() {
+  if (profilePhotoDeleteFlushInProgress) return;
+  const queue = readProfilePhotoDeleteQueue();
+  if (!queue.length || !isBackendConfigured() || !navigator.onLine) return;
+
+  profilePhotoDeleteFlushInProgress = true;
+  const remaining = [];
+
+  for (const employeeId of queue) {
+    try {
+      const data = await fetchJsonWithTimeout(
+        `${CONFIG.APPS_SCRIPT_URL}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'deleteProfilePhoto', employeeId })
+        },
+        15000
+      );
+      if (data.ok) {
+        clearProfilePhotoDeletedFlag(employeeId);
+      } else {
+        remaining.push(employeeId);
+      }
+    } catch (e) {
+      remaining.push(employeeId);
+    }
+  }
+
+  writeProfilePhotoDeleteQueue(remaining);
+  profilePhotoDeleteFlushInProgress = false;
 }
 
 function startProfilePhotoCapture() {
@@ -1444,6 +1662,8 @@ function onSubmitPreview() {
    ============================================ */
 function saveProfilePhotoFromCapture() {
   const employeeId = state.employee.id;
+  const employeeName = state.employee.name;
+  const employeeBranch = state.employee.branch;
   const photoDataUrl = state.capturedPhoto;
 
   // 1) Optimistic: langsung terasa di UI, tidak nunggu network sama sekali.
@@ -1458,12 +1678,15 @@ function saveProfilePhotoFromCapture() {
   }
 
   // 2) Upload ke server di background, tanpa mengunci navigasi user.
-  uploadProfilePhoto(employeeId, photoDataUrl);
+  // Nama & cabang ikut dikirim (bukan cuma ID): kalau backend belum punya
+  // baris untuk karyawan ini (lihat catatan fallback di uploadProfilePhoto),
+  // baris baru bisa langsung dibuat dengan nama yang benar, bukan placeholder.
+  uploadProfilePhoto(employeeId, photoDataUrl, employeeName, employeeBranch);
 }
 
-async function uploadProfilePhoto(employeeId, photoDataUrl) {
+async function uploadProfilePhoto(employeeId, photoDataUrl, employeeName, employeeBranch) {
   if (!isBackendConfigured() || !navigator.onLine) {
-    queueProfilePhotoOffline(employeeId, photoDataUrl);
+    queueProfilePhotoOffline(employeeId, photoDataUrl, employeeName, employeeBranch);
     showToast('Kamu sedang offline — foto profil akan disinkronkan otomatis nanti.');
     return;
   }
@@ -1474,33 +1697,47 @@ async function uploadProfilePhoto(employeeId, photoDataUrl) {
       {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'saveProfilePhoto', employeeId, photoBase64: photoDataUrl })
+        body: JSON.stringify({ action: 'saveProfilePhoto', employeeId, photoBase64: photoDataUrl, employeeName, employeeBranch })
       },
       25000 // foto profil relatif kecil (sudah dikompres sama seperti foto absen), tapi kasih ruang cukup utk jaringan lambat
     );
 
     if (data.ok) {
       showToast('Verifikasi identitas berhasil — foto profil tersinkron ke server.');
+      // Backend bisa saja membuatkan baris & ID BARU (fallback kalau ID lama
+      // belum ada di sheet, mis. race dengan sinkronisasi karyawan offline) —
+      // kalau itu terjadi, samakan ID di device ini juga supaya konsisten
+      // dengan yang tersimpan di sheet, bukan cuma foto & URL-nya saja.
+      if (data.employeeId && data.employeeId !== employeeId) {
+        migrateProfilePhotoLocalId(employeeId, data.employeeId);
+        if (state.employee && state.employee.id === employeeId) {
+          state.employee.id = data.employeeId;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state.employee));
+        }
+        const listedEmp = state.employees.find(e => e.id === employeeId);
+        if (listedEmp) listedEmp.id = data.employeeId;
+        employeeId = data.employeeId;
+      }
       applyServerProfilePhoto(employeeId, data.profilePhotoUrl);
     } else {
       // Ditolak server (bukan soal jaringan) -> tetap simpan sebagai pending
       // supaya tidak hilang, sambil kasih tahu apa alasannya kalau perlu dicek.
-      queueProfilePhotoOffline(employeeId, photoDataUrl);
+      queueProfilePhotoOffline(employeeId, photoDataUrl, employeeName, employeeBranch);
     }
   } catch (err) {
     // Gagal jaringan/timeout -> antrian, dicoba lagi otomatis nanti.
-    queueProfilePhotoOffline(employeeId, photoDataUrl);
+    queueProfilePhotoOffline(employeeId, photoDataUrl, employeeName, employeeBranch);
     showToast('Jaringan bermasalah — foto profil akan disinkronkan otomatis nanti.');
   }
 }
 
-function queueProfilePhotoOffline(employeeId, photoDataUrl) {
+function queueProfilePhotoOffline(employeeId, photoDataUrl, employeeName, employeeBranch) {
   const queue = readProfilePhotoQueue();
   // Satu karyawan cukup satu entri antrian — kalau sebelumnya sudah ada
   // (mis. ganti foto lagi sebelum sempat sinkron), timpa saja yang lama,
   // jangan menumpuk banyak entri untuk orang yang sama.
   const filtered = queue.filter(item => item.employeeId !== employeeId);
-  filtered.push({ employeeId, photoDataUrl, queuedAt: Date.now() });
+  filtered.push({ employeeId, photoDataUrl, employeeName, employeeBranch, queuedAt: Date.now() });
   writeProfilePhotoQueue(filtered);
 }
 
@@ -1530,13 +1767,30 @@ async function flushPendingProfilePhotoQueue() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'saveProfilePhoto', employeeId: item.employeeId, photoBase64: item.photoDataUrl })
+          body: JSON.stringify({
+            action: 'saveProfilePhoto',
+            employeeId: item.employeeId,
+            photoBase64: item.photoDataUrl,
+            employeeName: item.employeeName,
+            employeeBranch: item.employeeBranch
+          })
         },
         25000
       );
       if (data.ok) {
         syncedCount++;
-        applyServerProfilePhoto(item.employeeId, data.profilePhotoUrl);
+        let finalId = item.employeeId;
+        if (data.employeeId && data.employeeId !== item.employeeId) {
+          migrateProfilePhotoLocalId(item.employeeId, data.employeeId);
+          if (state.employee && state.employee.id === item.employeeId) {
+            state.employee.id = data.employeeId;
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state.employee));
+          }
+          const listedEmp = state.employees.find(e => e.id === item.employeeId);
+          if (listedEmp) listedEmp.id = data.employeeId;
+          finalId = data.employeeId;
+        }
+        applyServerProfilePhoto(finalId, data.profilePhotoUrl);
       } else {
         remaining.push(item);
       }

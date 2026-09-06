@@ -823,6 +823,39 @@ input { font-family: inherit; }
 .profile-hero-name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .profile-hero-branch { font-size: 13px; color: var(--text-tertiary); margin-top: 4px; }
 
+/* Wrapper avatar profil: membungkus avatar + 2 tombol mengambang (ganti &
+   hapus foto) supaya posisinya presisi relatif terhadap lingkaran avatar,
+   tidak ikut ter-clip oleh overflow:hidden milik .profile-hero-avatar. */
+.profile-avatar-wrap { position: relative; display: inline-flex; margin-bottom: 14px; }
+.profile-avatar-wrap .profile-hero-avatar { margin-bottom: 0; }
+
+.profile-avatar-action {
+  position: absolute; bottom: 0; width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 2.5px solid var(--surface);
+  cursor: pointer; padding: 0;
+  box-shadow: 0 4px 10px -3px rgba(0,0,0,0.35);
+  transition: transform 0.15s var(--ease-spring), filter 0.15s ease;
+}
+.profile-avatar-action:active { transform: scale(0.88); }
+.profile-avatar-action.hidden { display: none; }
+
+/* Tombol ganti foto (ikon kamera) — kanan bawah, warna brass senada aksen app. */
+.profile-avatar-edit {
+  right: -2px;
+  background: var(--brass-400); color: var(--ink-950);
+}
+.profile-avatar-edit:active { filter: brightness(0.94); }
+
+/* Tombol hapus foto (ikon silang) — kiri bawah, cuma tampil kalau foto SUDAH
+   ada (lihat renderAvatar/JS: kondisinya ketat, tidak pernah tampil untuk
+   akun yang belum punya foto sama sekali). Warna merah supaya jelas destruktif. */
+.profile-avatar-remove {
+  left: -2px;
+  background: var(--red-500, #C1543D); color: #fff;
+}
+.profile-avatar-remove:active { filter: brightness(0.92); }
+
 .profile-section-label {
   font-size: 12px; font-weight: 700; color: var(--text-tertiary);
   letter-spacing: 0.03em; text-transform: uppercase; margin: 4px 2px 10px;

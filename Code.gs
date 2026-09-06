@@ -81,7 +81,8 @@ function doPost(e) {
     const payload = JSON.parse(e.postData.contents);
     const action = payload.action;
     if (action === 'addEmployee') return jsonOut(addEmployee(payload.name, payload.branch));
-    if (action === 'saveProfilePhoto') return jsonOut(saveProfilePhoto(payload.employeeId, payload.photoBase64));
+    if (action === 'saveProfilePhoto') return jsonOut(saveProfilePhoto(payload.employeeId, payload.photoBase64, payload.employeeName, payload.employeeBranch));
+    if (action === 'deleteProfilePhoto') return jsonOut(deleteProfilePhotoAction(payload.employeeId));
     const result = recordAttendance(payload);
     return jsonOut(result);
   } catch (err) {
@@ -239,7 +240,7 @@ function invalidateEmployeeCache() {
      suatu saat perlu dicari/dicocokkan manual di Drive, jelas itu foto
      profil milik ID siapa.
    ============================================ */
-function saveProfilePhoto(employeeId, photoBase64) {
+function saveProfilePhoto(employeeId, photoBase64, employeeName, employeeBranch) {
   if (!employeeId) {
     return { ok: false, error: 'employeeId tidak ada' };
   }
@@ -269,8 +270,30 @@ function saveProfilePhoto(employeeId, photoBase64) {
         break;
       }
     }
+
+    // FIX BUG "foto profil hilang": kalau ID belum ada di sheet — biasanya
+    // karena karyawan baru ditambahkan pas OFFLINE, sempat dikasih ID
+    // sementara "local_..." di HP, lalu foto WAJIB langsung diambil sebelum
+    // ID lokal itu sempat diganti ID asli dari server — JANGAN langsung
+    // gagal dengan error. Dulu di sinilah fotonya "hilang": request ditolak,
+    // masuk antrian offline dengan ID lokal yang sudah tidak relevan lagi,
+    // dan tidak pernah ke-retry dengan ID yang benar.
+    // Sekarang: auto-buat baris baru untuk karyawan ini (pakai ID baru yang
+    // konsisten dengan alur addEmployee), supaya foto SELALU berhasil
+    // tersimpan di sheet apa pun urutan kejadiannya.
     if (targetRow === -1) {
-      return { ok: false, error: 'Karyawan tidak ditemukan di sheet' };
+      let maxId = 0;
+      for (let i = 1; i < rows.length; i++) {
+        const idNum = parseInt(rows[i][0], 10);
+        if (!isNaN(idNum) && idNum > maxId) maxId = idNum;
+      }
+      const newId = String(maxId + 1);
+      const name = String(employeeName || '').trim() || ('Karyawan ' + newId);
+      const branch = String(employeeBranch || '').trim();
+      sheet.appendRow([newId, name, branch]);
+      targetRow = sheet.getLastRow();
+      employeeId = newId; // dipakai lagi di bawah utk nama file & response
+      invalidateEmployeeCache();
     }
 
     // Hapus foto profil lama (kalau ada) SEBELUM upload yang baru, supaya
@@ -293,7 +316,63 @@ function saveProfilePhoto(employeeId, photoBase64) {
     sheet.getRange(targetRow, 4).setValue(photoUrl);
     invalidateEmployeeCache();
 
-    return { ok: true, profilePhotoUrl: photoUrl };
+    return { ok: true, profilePhotoUrl: photoUrl, employeeId: employeeId };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ============================================
+   HAPUS FOTO PROFIL (dari layar Profil PWA)
+   ------------------------------------------------
+   - Menghapus file foto dari Drive DAN mengosongkan kolom FotoProfilURL
+     di sheet Karyawan, supaya endpoint "employees" berikutnya tidak lagi
+     membawa URL foto yang sudah tidak ada.
+   - Idempotent: dipanggil dua kali (mis. retry antrian offline) untuk
+     karyawan yang sama tetap aman, tidak error walau foto sudah kosong.
+   ============================================ */
+function deleteProfilePhotoAction(employeeId) {
+  if (!employeeId) {
+    return { ok: false, error: 'employeeId tidak ada' };
+  }
+
+  const lock = LockService.getScriptLock();
+  const gotLock = lock.tryLock(10000);
+  if (!gotLock) {
+    return { ok: false, error: 'Sistem sedang sibuk, coba lagi sebentar' };
+  }
+
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_KARYAWAN);
+    if (!sheet) {
+      return { ok: false, error: 'Sheet "Karyawan" tidak ditemukan' };
+    }
+
+    const rows = sheet.getDataRange().getValues();
+    let targetRow = -1;
+    let oldPhotoUrl = '';
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(employeeId)) {
+        targetRow = i + 1;
+        oldPhotoUrl = String(rows[i][3] || '');
+        break;
+      }
+    }
+    if (targetRow === -1) {
+      // Karyawan tidak ada di sheet — tidak ada apa pun untuk dihapus,
+      // anggap sukses (idempotent) supaya klien tidak retry sia-sia.
+      return { ok: true, alreadyEmpty: true };
+    }
+
+    if (oldPhotoUrl) {
+      deleteProfilePhotoFile(oldPhotoUrl);
+    }
+    sheet.getRange(targetRow, 4).setValue('');
+    invalidateEmployeeCache();
+
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: String(err) };
   } finally {
