@@ -153,11 +153,33 @@ function isBackendConfigured() {
 }
 
 /* ============================================
+   FIX: EFEK TEKAN/ANIMASI ":active" TIDAK MUNCUL DI PWA iOS/SAFARI
+   ------------------------------------------------
+   Akar masalahnya BUKAN di CSS (semua definisi :active/transition di
+   style.css sudah benar) — ini keterbatasan WebKit/Safari yang sudah lama
+   dikenal: iOS Safari TIDAK PERNAH mengaktifkan pseudo-class ":active"
+   pada sentuhan (tap) kecuali ada MINIMAL SATU event listener touch
+   (touchstart/touchend/dst) yang ter-attach di document atau elemennya.
+   Tanpa listener itu, WebKit menganggap tidak ada elemen interaktif yang
+   "peduli" pada sentuhan, sehingga :active dilewati sama sekali — inilah
+   sebabnya SEMUA efek tekan/kedelep/scale-down di app ini (tombol, kartu,
+   nav, dsb) terasa "tidak ada" HANYA di iPhone, padahal kodenya berjalan
+   normal di Android/desktop. Baris di bawah ini adalah fix standar &
+   minimal: cukup MENDAFTARKAN listener (isi fungsinya boleh kosong,
+   {passive:true} supaya tidak memperlambat scroll), maka WebKit langsung
+   mulai menghormati :active di SELURUH dokumen seperti browser lain.
+   ============================================ */
+function enableIosActiveStates() {
+  document.addEventListener('touchstart', function () {}, { passive: true });
+}
+
+/* ============================================
    INIT
    ============================================ */
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
+  enableIosActiveStates();
   registerServiceWorker();
   initTheme();
   startClock();
@@ -197,6 +219,17 @@ function attachEventListeners() {
     if (e.key === 'Enter') { e.preventDefault(); onConfirmAddEmployee(); }
   });
   document.getElementById('btn-logout').addEventListener('click', onLogout);
+  document.getElementById('btn-delete-account').addEventListener('click', onDeleteAccountClick);
+  document.getElementById('btn-cancel-delete-account').addEventListener('click', closeDeleteAccountModal);
+  document.getElementById('btn-confirm-delete-account').addEventListener('click', onConfirmDeleteAccount);
+  document.getElementById('input-delete-confirm').addEventListener('input', onDeleteConfirmInput);
+  document.getElementById('input-delete-confirm').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); onConfirmDeleteAccount(); }
+  });
+  document.getElementById('btn-back-to-login-after-delete').addEventListener('click', () => {
+    showScreen('screen-login');
+    loadEmployees(); // pastikan nama yang baru dihapus langsung hilang dari daftar pilih nama
+  });
   document.getElementById('btn-camera-close').addEventListener('click', closeCamera);
   document.getElementById('btn-shutter').addEventListener('click', capturePhoto);
   document.getElementById('btn-retake').addEventListener('click', retakePhoto);
@@ -375,18 +408,22 @@ function setBottomNavActive(target) {
 
 function attachConnectivityListeners() {
   window.addEventListener('online', () => {
-    showToast('Koneksi kembali — mencoba kirim absensi tertunda…');
+    showToast('Koneksi internet tersambung kembali. Mengirim absensi yang tertunda…');
     flushPendingQueue();
     flushPendingEmployeeQueue();
     flushPendingProfilePhotoQueue();
     flushPendingProfilePhotoDeleteQueue();
   });
   window.addEventListener('offline', () => {
-    showToast('Kamu sedang offline. Absensi akan dikirim otomatis saat online.', true);
+    showToast('Kamu sedang offline. Foto dan lokasi tetap bisa diambil — data akan dikirim otomatis begitu koneksi kembali tersedia.', true);
   });
-  // Coba flush setiap kali app dibuka kembali (misal dari background)
+  // Coba flush setiap kali app dibuka kembali (misal dari background).
+  // loadEmployees() ikut dipanggil di sini supaya foto profil (dan status
+  // hapus/ganti foto yang mungkin terjadi di device lain) selalu tersinkron
+  // ulang begitu user kembali membuka app — bukan cuma sekali saat pertama load.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && navigator.onLine) {
+      loadEmployees();
       flushPendingQueue();
       flushPendingEmployeeQueue();
       flushPendingProfilePhotoQueue();
@@ -439,12 +476,59 @@ async function loadEmployees() {
   try {
     const data = await fetchJsonWithTimeout(`${CONFIG.APPS_SCRIPT_URL}?action=employees`, {}, 8000);
     if (Array.isArray(data.employees) && data.employees.length) {
+      syncProfilePhotosFromServer(data.employees); // FIX: samakan cache foto lokal dgn kondisi server TERBARU
       state.employees = mergeWithPendingEmployees(data.employees);
       renderEmployeeList(state.employees);
+      renderAvatar(state.employee); // avatar yang sedang login ikut ter-update kalau berubah di device lain
     }
   } catch (e) {
     // offline / backend belum jalan → tetap pakai fallback yang sudah tampil
   }
+}
+
+/* ============================================
+   FIX: FOTO PROFIL "MASIH TERBACA" DI DEVICE LAIN SETELAH DIHAPUS
+   ------------------------------------------------
+   Akar masalahnya: getProfilePhoto() dulu hanya memeriksa data server
+   SEBAGAI FALLBACK saat cache lokal (localStorage) kosong. Begitu sebuah
+   device pernah menyimpan cache foto (mis. karyawan pernah buka HP itu
+   sebelumnya), device itu TIDAK PERNAH mengecek ulang apakah foto itu
+   sudah dihapus/diganti di server — foto lama nyangkut selamanya sampai
+   localStorage dibersihkan manual.
+   Perbaikannya: setiap kali daftar karyawan berhasil diambil dari server
+   (loadEmployees, dan setelah menghapus/mengganti foto), cache lokal
+   SETIAP karyawan dibandingkan & disamakan dengan profilePhotoUrl milik
+   server — sumber kebenaran selalu Google Sheets, localStorage cuma
+   cache tampilan supaya avatar terasa instan, bukan sumber utama.
+   ============================================ */
+function syncProfilePhotosFromServer(serverEmployees) {
+  serverEmployees.forEach(emp => {
+    if (!emp || !emp.id) return;
+    const serverUrl = emp.profilePhotoUrl || '';
+    let cachedUrl = '';
+    try { cachedUrl = localStorage.getItem(PROFILE_PHOTO_PREFIX + emp.id) || ''; } catch (e) { /* abaikan */ }
+
+    if (serverUrl) {
+      // Server PUNYA foto -> pastikan cache lokal ikut foto server ini
+      // (bukan foto lama/berbeda), dan hapus flag "baru saja dihapus" kalau
+      // ada sisa dari percobaan hapus sebelumnya yang ternyata gagal di server.
+      if (cachedUrl !== serverUrl && !cachedUrl.startsWith('data:')) {
+        // Cache lokal bukan foto hasil jepretan yang belum sempat ke-upload
+        // (dataURL base64) -> aman ditimpa dengan URL server terbaru.
+        try { localStorage.setItem(PROFILE_PHOTO_PREFIX + emp.id, serverUrl); } catch (e) { /* abaikan */ }
+      }
+      clearProfilePhotoDeletedFlag(emp.id);
+    } else {
+      // Server TIDAK/TIDAK LAGI punya foto -> kalau device ini masih
+      // menyimpan cache berupa URL (bukan dataURL base64 hasil jepretan
+      // lokal yang masih menunggu upload), berarti foto itu memang sudah
+      // dihapus di server dan cache lokal ini basi. Hapus supaya tidak
+      // "terbaca lagi" di device ini.
+      if (cachedUrl && !cachedUrl.startsWith('data:')) {
+        try { localStorage.removeItem(PROFILE_PHOTO_PREFIX + emp.id); } catch (e) { /* abaikan */ }
+      }
+    }
+  });
 }
 
 // Menggabungkan daftar karyawan "resmi" (dari server/fallback config) dengan
@@ -557,22 +641,22 @@ async function onConfirmAddEmployee() {
   const branch = document.getElementById('input-new-employee-branch').value.trim().replace(/\s+/g, ' ');
 
   if (!name) {
-    setAddEmployeeError('Nama tidak boleh kosong.');
+    setAddEmployeeError('Nama tidak boleh kosong. Silakan isi nama lengkap kamu.');
     return;
   }
   if (name.length < 2) {
-    setAddEmployeeError('Nama terlalu pendek.');
+    setAddEmployeeError('Nama terlalu pendek. Minimal 2 karakter.');
     return;
   }
   if (name.length > 100) {
-    setAddEmployeeError('Nama terlalu panjang.');
+    setAddEmployeeError('Nama terlalu panjang. Maksimal 100 karakter.');
     return;
   }
   // Cek duplikat lokal dulu (termasuk yang masih pending) supaya tidak
   // menembak backend untuk nama yang jelas-jelas sudah ada di layar ini.
   const already = state.employees.find(e => e.name.trim().toLowerCase() === name.toLowerCase());
   if (already) {
-    setAddEmployeeError('Nama ini sudah ada di daftar.');
+    setAddEmployeeError('Nama ini sudah terdaftar di dalam sistem.');
     return;
   }
 
@@ -582,12 +666,13 @@ async function onConfirmAddEmployee() {
   btn.disabled = true;
   btn.textContent = 'Menyimpan…';
   document.getElementById('btn-cancel-add-employee').disabled = true;
+  showLoading('Menyimpan nama baru…');
 
   try {
     if (!isBackendConfigured() || !navigator.onLine) {
       queueEmployeeOffline(name, branch);
       closeAddEmployeeModal();
-      showToast('Kamu sedang offline — nama disimpan & akan disinkronkan otomatis nanti.');
+      showToast('Kamu sedang offline. Nama sudah tersimpan di perangkat ini dan akan otomatis dikirim ke server begitu koneksi tersedia kembali.');
       return;
     }
 
@@ -614,7 +699,7 @@ async function onConfirmAddEmployee() {
         renderEmployeeList(state.employees);
       }
       closeAddEmployeeModal();
-      showToast(data.duplicate ? 'Nama sudah terdaftar sebelumnya — langsung dipilih.' : 'Nama baru berhasil ditambahkan.');
+      showToast(data.duplicate ? 'Nama sudah terdaftar sebelumnya di sistem — akun ini langsung dipilih untuk kamu.' : 'Nama baru berhasil didaftarkan ke server.');
       selectEmployee(emp);
     } catch (networkErr) {
       // Gagal karena jaringan (timeout/offline mendadak) -> jangan buang
@@ -622,13 +707,14 @@ async function onConfirmAddEmployee() {
       // otomatis dicoba lagi begitu online.
       queueEmployeeOffline(name, branch);
       closeAddEmployeeModal();
-      showToast('Jaringan bermasalah — nama disimpan & akan disinkronkan otomatis nanti.');
+      showToast('Koneksi jaringan bermasalah. Nama sudah tersimpan di perangkat ini dan akan otomatis disinkronkan ke server begitu koneksi pulih.');
     }
   } finally {
     addEmployeeSubmitting = false;
     btn.disabled = false;
     btn.textContent = btnOriginalText;
     document.getElementById('btn-cancel-add-employee').disabled = false;
+    hideLoading();
   }
 }
 
@@ -690,7 +776,7 @@ async function flushPendingEmployeeQueue() {
   employeeFlushInProgress = false;
 
   if (syncedCount > 0) {
-    showToast(`${syncedCount} nama baru berhasil disinkronkan ke server.`);
+    showToast(`${syncedCount} nama karyawan yang tertunda berhasil disinkronkan ke server.`);
   }
 }
 
@@ -824,11 +910,11 @@ function selectEmployee(emp) {
 function onLogout() {
   showModal({
     icon: 'warn',
-    title: 'Ganti pengguna?',
-    message: 'Kamu akan keluar dan bisa memilih nama lain.',
+    title: 'Keluar dari Akun Ini?',
+    message: 'Kamu akan keluar dari sesi ini dan bisa memilih atau mendaftarkan nama lain. Data absensi kamu tetap aman tersimpan di server.',
     actions: [
       { label: 'Batal', style: 'ghost' },
-      { label: 'Ganti', style: 'solid', onClick: () => {
+      { label: 'Keluar', style: 'solid', onClick: () => {
         localStorage.removeItem(STORAGE_KEY);
         state.employee = null;
         showScreen('screen-login');
@@ -838,10 +924,113 @@ function onLogout() {
 }
 
 /* ============================================
+   HAPUS AKUN KARYAWAN (permanen, dari layar Profil)
+   ------------------------------------------------
+   Aksi paling destruktif di seluruh app: menghapus profil, foto, DAN
+   seluruh riwayat absensi karyawan secara permanen dari server (lihat
+   deleteEmployeeAction di Code.gs). Karena konsekuensinya tidak bisa
+   dibatalkan, alur konfirmasi sengaja dibuat lebih ketat dari modal
+   konfirmasi biasa: user harus mengetik "HAPUS" secara eksplisit di
+   kolom teks (bukan cuma tap sekali) sebelum tombol "Hapus Permanen"
+   aktif — mencegah penghapusan tidak sengaja akibat tap ganda/refleks.
+   ============================================ */
+function onDeleteAccountClick() {
+  if (!state.employee) return;
+  const overlay = document.getElementById('delete-account-overlay');
+  const input = document.getElementById('input-delete-confirm');
+  const confirmBtn = document.getElementById('btn-confirm-delete-account');
+  input.value = '';
+  confirmBtn.disabled = true;
+  overlay.classList.remove('hidden');
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeDeleteAccountModal() {
+  document.getElementById('delete-account-overlay').classList.add('hidden');
+}
+
+function onDeleteConfirmInput(e) {
+  const confirmBtn = document.getElementById('btn-confirm-delete-account');
+  confirmBtn.disabled = e.target.value.trim().toUpperCase() !== 'HAPUS';
+}
+
+let deleteAccountSubmitting = false;
+async function onConfirmDeleteAccount() {
+  if (deleteAccountSubmitting || !state.employee) return;
+  const input = document.getElementById('input-delete-confirm');
+  if (input.value.trim().toUpperCase() !== 'HAPUS') return;
+
+  if (!isBackendConfigured()) {
+    showToast('Backend belum terhubung, sehingga akun belum bisa dihapus dari server. Hubungi admin untuk menghubungkan Google Sheets terlebih dahulu.', true);
+    return;
+  }
+  if (!navigator.onLine) {
+    showToast('Kamu sedang offline. Hapus akun memerlukan koneksi internet aktif karena data akan dihapus langsung dari server.', true);
+    return;
+  }
+
+  deleteAccountSubmitting = true;
+  const confirmBtn = document.getElementById('btn-confirm-delete-account');
+  const cancelBtn = document.getElementById('btn-cancel-delete-account');
+  confirmBtn.disabled = true;
+  cancelBtn.disabled = true;
+  showLoading('Menghapus akun secara permanen…');
+
+  const employeeId = state.employee.id;
+  try {
+    const data = await fetchJsonWithTimeout(
+      `${CONFIG.APPS_SCRIPT_URL}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'deleteEmployee', employeeId })
+      },
+      20000
+    );
+
+    if (!data.ok) {
+      showToast(data.error || 'Gagal menghapus akun. Silakan coba lagi.', true);
+      return;
+    }
+
+    // Bersihkan SEMUA jejak lokal akun ini: sesi login, cache foto, cache
+    // Home/Riwayat, dan antrian pending apa pun yang mungkin masih menunggu
+    // sinkronisasi — supaya tidak ada data "hantu" tersisa di perangkat ini.
+    cleanupLocalDataForEmployee(employeeId);
+    closeDeleteAccountModal();
+    state.employee = null;
+    showScreen('screen-account-deleted');
+  } catch (err) {
+    showToast('Koneksi jaringan bermasalah. Akun belum berhasil dihapus — silakan periksa koneksi dan coba lagi.', true);
+  } finally {
+    deleteAccountSubmitting = false;
+    confirmBtn.disabled = false;
+    cancelBtn.disabled = false;
+    hideLoading();
+  }
+}
+
+function cleanupLocalDataForEmployee(employeeId) {
+  localStorage.removeItem(STORAGE_KEY);
+  removeLocalProfilePhoto(employeeId);
+  try {
+    localStorage.removeItem(PROFILE_PHOTO_DELETED_PREFIX + employeeId);
+    localStorage.removeItem(homeCacheKeyFor(employeeId));
+    localStorage.removeItem(historyCacheKeyFor(employeeId));
+  } catch (e) { /* abaikan */ }
+  writeProfilePhotoQueue(readProfilePhotoQueue().filter(item => item.employeeId !== employeeId));
+  writeProfilePhotoDeleteQueue(readProfilePhotoDeleteQueue().filter(id => id !== employeeId));
+  state.employees = state.employees.filter(e => e.id !== employeeId);
+}
+
+/* ============================================
    HOME (status hari ini + riwayat ringkas) — SATU fetch gabungan + cache instan
    ============================================ */
 function homeCacheKey() {
-  return HOME_CACHE_PREFIX + (state.employee ? state.employee.id : 'anon');
+  return homeCacheKeyFor(state.employee ? state.employee.id : 'anon');
+}
+function homeCacheKeyFor(employeeId) {
+  return HOME_CACHE_PREFIX + employeeId;
 }
 
 // Render SEKETIKA dari cache lokal (kalau ada) — tanpa nunggu network sama
@@ -860,7 +1049,7 @@ async function refreshHome() {
   const backendConfigured = isBackendConfigured();
   if (!backendConfigured) {
     const container = document.getElementById('recent-history');
-    if (container) container.innerHTML = '<div class="recent-history-empty">Riwayat akan muncul setelah backend Google Sheets terhubung.</div>';
+    if (container) container.innerHTML = '<div class="recent-history-empty">Riwayat presensi akan tampil di sini setelah server Google Sheets terhubung.</div>';
     return; // belum ada backend, biarkan status default "Belum absen"
   }
 
@@ -992,8 +1181,8 @@ function onRemoveProfilePhotoClick() {
 
   showModal({
     icon: 'warn',
-    title: 'Hapus foto profil?',
-    message: 'Foto profil kamu akan dihapus dari perangkat ini dan dari server. Kamu bisa mengambil foto baru kapan saja setelahnya.',
+    title: 'Hapus Foto Profil?',
+    message: 'Foto profil akan dihapus dari perangkat ini dan dari server secara permanen. Kamu tetap bisa mengambil foto profil baru kapan saja setelahnya.',
     actions: [
       { label: 'Batal', style: 'ghost' },
       { label: 'Hapus', style: 'solid', onClick: () => deleteProfilePhoto(emp) }
@@ -1001,8 +1190,9 @@ function onRemoveProfilePhotoClick() {
   });
 }
 
-function deleteProfilePhoto(emp) {
+async function deleteProfilePhoto(emp) {
   const employeeId = emp.id;
+  showLoading('Menghapus foto profil…');
 
   // 1) Optimistic lokal — langsung hilang dari layar & tidak akan tampil
   // lagi biar user tidak nunggu, tanpa peduli hasil server.
@@ -1016,13 +1206,18 @@ function deleteProfilePhoto(emp) {
   writeProfilePhotoQueue(remainingQueue);
 
   renderAvatar(state.employee);
-  showToast('Foto profil dihapus.');
 
-  // 2) Hapus di server juga (foto asli + kolom sheet), diam-diam di
-  // belakang layar. Kalau gagal, foto tetap terhapus di HP ini — tidak
-  // memblokir user, karena yang terpenting privasinya di perangkat sendiri
-  // sudah terjaga; sinkronisasi server menyusul kapan saja koneksi ada.
-  requestServerDeleteProfilePhoto(employeeId);
+  // 2) Hapus di server juga (foto asli + kolom sheet). Loading overlay
+  // sengaja ditunggu SEBENTAR di sini (bukan sepenuhnya latar belakang)
+  // supaya user melihat konfirmasi proses selesai, walau kalau gagal
+  // jaringan, foto tetap terhapus di HP ini (privasi diutamakan) dan
+  // sinkronisasi server otomatis menyusul lewat antrian.
+  try {
+    await requestServerDeleteProfilePhoto(employeeId);
+  } finally {
+    hideLoading();
+  }
+  showToast('Foto profil berhasil dihapus.');
 }
 
 function readProfilePhotoDeleteQueue() {
@@ -1151,10 +1346,10 @@ function startCameraStream() {
     const isProfileMode = state.cameraMode === 'profile';
     showModal({
       icon: 'error',
-      title: 'Tidak bisa akses kamera',
+      title: 'Kamera Tidak Dapat Diakses',
       message: isProfileMode
-        ? 'Izinkan akses kamera di pengaturan browser untuk melengkapi foto profil.'
-        : 'Izinkan akses kamera di pengaturan browser untuk melanjutkan absensi.',
+        ? 'Aplikasi memerlukan izin kamera untuk mengambil foto profil verifikasi identitas. Silakan aktifkan izin kamera pada pengaturan browser, lalu coba lagi.'
+        : 'Aplikasi memerlukan izin kamera untuk melanjutkan proses absensi selfie. Silakan aktifkan izin kamera pada pengaturan browser, lalu coba lagi.',
       actions: [{ label: 'Kembali', style: 'solid', onClick: () => {
         if (isProfileMode) {
           showScreen('screen-home');
@@ -1269,7 +1464,7 @@ function resetGpsPanel() {
   document.getElementById('gps-address').textContent = 'Menunggu lokasi akurat…';
   document.getElementById('gps-panel').classList.remove('accurate');
   document.getElementById('btn-shutter').disabled = true;
-  document.getElementById('camera-hint').textContent = 'Menunggu GPS akurat';
+  document.getElementById('camera-hint').textContent = 'Menunggu sinyal GPS yang akurat…';
 
   // Kalau setelah GPS_MAX_WAIT akurasi belum ideal, tetap izinkan foto
   // (lebih baik absen dengan akurasi menengah daripada karyawan stuck tak bisa absen
@@ -1279,14 +1474,14 @@ function resetGpsPanel() {
     const shutterBtn = document.getElementById('btn-shutter');
     if (shutterBtn.disabled) {
       shutterBtn.disabled = false;
-      document.getElementById('camera-hint').textContent = 'Bisa lanjut foto dengan akurasi saat ini';
+      document.getElementById('camera-hint').textContent = 'Akurasi lokasi saat ini cukup — kamu bisa lanjut mengambil foto';
     }
   }, CONFIG.GPS_MAX_WAIT);
 }
 
 function startGpsWatch() {
   if (!navigator.geolocation) {
-    document.getElementById('gps-status-text').textContent = 'GPS tidak didukung perangkat ini';
+    document.getElementById('gps-status-text').textContent = 'Perangkat ini tidak mendukung layanan lokasi (GPS)';
     return;
   }
 
@@ -1332,14 +1527,14 @@ function onGpsUpdate(position) {
 
   if (isAccurate) {
     pulse.classList.add('locked');
-    statusText.textContent = isGreat ? 'Lokasi terkunci — sangat akurat' : 'Lokasi terkunci — akurat';
+    statusText.textContent = isGreat ? 'Lokasi terkunci — akurasi sangat baik' : 'Lokasi terkunci — akurasi baik';
     shutterBtn.disabled = false;
-    hint.textContent = 'Ketuk untuk ambil foto';
+    hint.textContent = 'Ketuk tombol untuk mengambil foto';
   } else {
     pulse.classList.remove('locked');
-    statusText.textContent = `Menyempurnakan akurasi (±${roundedAcc}m)`;
+    statusText.textContent = `Menyempurnakan akurasi lokasi (±${roundedAcc}m)`;
     shutterBtn.disabled = false; // tetap bisa dipakai kalau GPS lemah tapi ada sinyal
-    hint.textContent = 'Akurasi masih rendah, tunggu sebentar untuk hasil terbaik';
+    hint.textContent = 'Akurasi lokasi masih rendah — disarankan menunggu sebentar untuk hasil terbaik';
   }
 
   // Reverse geocode: dipicu di titik GPS PERTAMA (jangan nunggu "locked" — ini
@@ -1358,11 +1553,11 @@ function onGpsError(err) {
   const statusText = document.getElementById('gps-status-text');
   const shutterBtn = document.getElementById('btn-shutter');
   if (err.code === 1) {
-    statusText.textContent = 'Izin lokasi ditolak — aktifkan di pengaturan';
+    statusText.textContent = 'Izin lokasi ditolak — aktifkan izin lokasi pada pengaturan browser';
   } else if (err.code === 3) {
-    statusText.textContent = 'Sinyal GPS lemah, mencari ulang…';
+    statusText.textContent = 'Sinyal GPS lemah — sedang mencari ulang…';
   } else {
-    statusText.textContent = 'Gagal mendapat lokasi, coba lagi';
+    statusText.textContent = 'Gagal mendapatkan lokasi — silakan coba lagi';
   }
   // Jangan matikan shutter kalau sudah pernah dapat titik sebelumnya
   if (!state.gps) shutterBtn.disabled = true;
@@ -1660,7 +1855,7 @@ function onSubmitPreview() {
       bisa lanjut pakai app — kalau uploadnya gagal, user tetap lanjut ke
       Home dengan foto tersimpan lokal, dan sinkronisasi menyusul otomatis.
    ============================================ */
-function saveProfilePhotoFromCapture() {
+async function saveProfilePhotoFromCapture() {
   const employeeId = state.employee.id;
   const employeeName = state.employee.name;
   const employeeBranch = state.employee.branch;
@@ -1671,23 +1866,28 @@ function saveProfilePhotoFromCapture() {
   renderAvatar(state.employee);
   clearInterval(state.timestampInterval);
   state.cameraMode = 'attendance';
-  goToHome();
 
   if (!savedLocally) {
-    showToast('Foto profil belum tersimpan di perangkat ini, silakan coba lagi dari halaman Profil', true);
+    showToast('Foto tidak dapat disimpan di perangkat ini — kemungkinan penyimpanan penuh. Silakan coba lagi dari halaman Profil.', true);
   }
 
-  // 2) Upload ke server di background, tanpa mengunci navigasi user.
-  // Nama & cabang ikut dikirim (bukan cuma ID): kalau backend belum punya
-  // baris untuk karyawan ini (lihat catatan fallback di uploadProfilePhoto),
-  // baris baru bisa langsung dibuat dengan nama yang benar, bukan placeholder.
-  uploadProfilePhoto(employeeId, photoDataUrl, employeeName, employeeBranch);
+  // 2) Tunggu proses upload ke server (dengan loading screen) sebelum
+  // berpindah ke Home, supaya user melihat dengan jelas bahwa foto sedang
+  // diproses/disinkronkan — bukan cuma berpindah layar tiba-tiba tanpa
+  // indikasi apa pun sedang terjadi di belakang layar.
+  showLoading('Menyinkronkan foto profil…');
+  try {
+    await uploadProfilePhoto(employeeId, photoDataUrl, employeeName, employeeBranch);
+  } finally {
+    hideLoading();
+    goToHome();
+  }
 }
 
 async function uploadProfilePhoto(employeeId, photoDataUrl, employeeName, employeeBranch) {
   if (!isBackendConfigured() || !navigator.onLine) {
     queueProfilePhotoOffline(employeeId, photoDataUrl, employeeName, employeeBranch);
-    showToast('Kamu sedang offline — foto profil akan disinkronkan otomatis nanti.');
+    showToast('Kamu sedang offline. Foto profil sudah tersimpan di perangkat ini dan akan otomatis disinkronkan ke server begitu koneksi tersedia kembali.');
     return;
   }
 
@@ -1703,7 +1903,7 @@ async function uploadProfilePhoto(employeeId, photoDataUrl, employeeName, employ
     );
 
     if (data.ok) {
-      showToast('Verifikasi identitas berhasil — foto profil tersinkron ke server.');
+      showToast('Verifikasi identitas berhasil. Foto profil sudah tersinkron ke server.');
       // Backend bisa saja membuatkan baris & ID BARU (fallback kalau ID lama
       // belum ada di sheet, mis. race dengan sinkronisasi karyawan offline) —
       // kalau itu terjadi, samakan ID di device ini juga supaya konsisten
@@ -1723,11 +1923,12 @@ async function uploadProfilePhoto(employeeId, photoDataUrl, employeeName, employ
       // Ditolak server (bukan soal jaringan) -> tetap simpan sebagai pending
       // supaya tidak hilang, sambil kasih tahu apa alasannya kalau perlu dicek.
       queueProfilePhotoOffline(employeeId, photoDataUrl, employeeName, employeeBranch);
+      showToast('Foto tersimpan di perangkat ini, namun belum berhasil disinkronkan ke server. Akan dicoba lagi secara otomatis.', true);
     }
   } catch (err) {
     // Gagal jaringan/timeout -> antrian, dicoba lagi otomatis nanti.
     queueProfilePhotoOffline(employeeId, photoDataUrl, employeeName, employeeBranch);
-    showToast('Jaringan bermasalah — foto profil akan disinkronkan otomatis nanti.');
+    showToast('Koneksi jaringan bermasalah. Foto profil sudah tersimpan di perangkat ini dan akan otomatis disinkronkan begitu koneksi pulih.');
   }
 }
 
@@ -1803,7 +2004,7 @@ async function flushPendingProfilePhotoQueue() {
   profilePhotoFlushInProgress = false;
 
   if (syncedCount > 0) {
-    showToast(`Foto profil (${syncedCount}) berhasil disinkronkan ke server.`);
+    showToast(`${syncedCount} foto profil yang tertunda berhasil disinkronkan ke server.`);
   }
 }
 
@@ -1825,9 +2026,9 @@ async function submitAttendance() {
   if (!backendConfigured) {
     showModal({
       icon: 'warn',
-      title: 'Backend belum terhubung',
-      message: 'URL Apps Script di config.js belum diisi, jadi absensi belum bisa dikirim ke Google Sheets. Ikuti panduan di README.md untuk menghubungkannya.',
-      actions: [{ label: 'Oke', style: 'solid' }]
+      title: 'Server Belum Terhubung',
+      message: 'Alamat server (Apps Script) di config.js belum diatur, sehingga absensi belum dapat dikirim ke Google Sheets. Silakan ikuti panduan pemasangan di README.md untuk menghubungkannya terlebih dahulu.',
+      actions: [{ label: 'Mengerti', style: 'solid' }]
     });
     return;
   }
@@ -1862,12 +2063,12 @@ async function submitAttendance() {
       // sebelum respons balik) — anggap ini bukan kegagalan, langsung refresh status.
       showModal({
         icon: 'warn',
-        title: 'Absensi sudah tercatat',
-        message: data.error,
-        actions: [{ label: 'Oke', style: 'solid', onClick: goToHome }]
+        title: 'Absensi Sudah Tercatat',
+        message: data.error + ' Status kamu akan disegarkan ke data terbaru dari server.',
+        actions: [{ label: 'Mengerti', style: 'solid', onClick: goToHome }]
       });
     } else {
-      throw new Error(data.error || 'Gagal mengirim absen');
+      throw new Error(data.error || 'Gagal mengirim absensi ke server');
     }
   } catch (err) {
     // Gagal karena jaringan (bukan ditolak server) -> simpan ke antrian offline
@@ -1878,8 +2079,8 @@ async function submitAttendance() {
     } else {
       showModal({
         icon: 'error',
-        title: 'Gagal mengirim absen',
-        message: err.message,
+        title: 'Absensi Gagal Terkirim',
+        message: err.message || 'Terjadi kesalahan saat mengirim data ke server. Silakan periksa koneksi internet kamu dan coba lagi.',
         actions: [{ label: 'Coba Lagi', style: 'solid' }]
       });
     }
@@ -1893,8 +2094,10 @@ function setSubmitLoading(isLoading) {
   const btn = document.getElementById('btn-submit');
   const btnText = document.getElementById('btn-submit-text');
   const spinner = document.getElementById('btn-submit-spinner');
+  const btnRetake = document.getElementById('btn-retake');
   btn.disabled = isLoading;
-  btnText.textContent = isLoading ? 'Mengirim…' : 'Kirim Absensi';
+  if (btnRetake) btnRetake.disabled = isLoading; // cegah user ambil ulang foto selagi sedang mengirim
+  btnText.textContent = isLoading ? 'Mengirim ke server…' : 'Kirim Absensi';
   spinner.classList.toggle('hidden', !isLoading);
 }
 
@@ -1967,7 +2170,7 @@ async function flushPendingQueue() {
   flushInProgress = false;
 
   if (sentCount > 0) {
-    showToast(`${sentCount} absensi tertunda berhasil dikirim.`);
+    showToast(`${sentCount} data absensi yang tertunda berhasil dikirim ke server.`);
     if (document.getElementById('screen-home').classList.contains('active')) {
       refreshHome();
     }
@@ -1977,18 +2180,18 @@ async function flushPendingQueue() {
 function showQueuedSuccess() {
   const type = state.currentType;
   document.getElementById('success-title').textContent =
-    type === 'masuk' ? 'Absensi masuk tersimpan' : 'Absensi keluar tersimpan';
+    type === 'masuk' ? 'Absensi Masuk Tersimpan' : 'Absensi Keluar Tersimpan';
   document.getElementById('success-sub').textContent =
-    'Kamu sedang offline — foto & lokasi sudah diamankan dan akan terkirim otomatis begitu koneksi kembali.';
+    'Kamu sedang offline. Foto dan lokasi sudah diamankan dengan aman di perangkat ini, dan akan otomatis terkirim ke server begitu koneksi internet tersedia kembali.';
   showScreen('screen-success');
 }
 
 function showSuccess(data) {
   const type = state.currentType;
   document.getElementById('success-title').textContent =
-    type === 'masuk' ? 'Absensi masuk berhasil' : 'Absensi keluar berhasil';
+    type === 'masuk' ? 'Absensi Masuk Berhasil' : 'Absensi Keluar Berhasil';
   document.getElementById('success-sub').textContent =
-    `${safeTimeText(data.data.time)} WIB · ${data.data.address}`;
+    `Tercatat pukul ${safeTimeText(data.data.time)} WIB · ${data.data.address}`;
   showScreen('screen-success');
 }
 
@@ -2012,7 +2215,7 @@ function renderRecentHistory(list) {
     .slice(0, 7);
 
   if (!dates.length) {
-    container.innerHTML = '<div class="recent-history-empty">Belum ada riwayat absensi.</div>';
+    container.innerHTML = '<div class="recent-history-empty">Belum ada riwayat absensi. Riwayat akan muncul di sini setelah kamu melakukan absen pertama.</div>';
     return;
   }
 
@@ -2090,7 +2293,10 @@ function parseDateSafe(dateStr) {
    HISTORY (halaman penuh, dibuka dari bottom nav)
    ============================================ */
 function historyCacheKey() {
-  return HISTORY_CACHE_PREFIX + (state.employee ? state.employee.id : 'anon');
+  return historyCacheKeyFor(state.employee ? state.employee.id : 'anon');
+}
+function historyCacheKeyFor(employeeId) {
+  return HISTORY_CACHE_PREFIX + employeeId;
 }
 
 async function openHistory() {
@@ -2099,7 +2305,7 @@ async function openHistory() {
 
   const backendConfigured = isBackendConfigured();
   if (!backendConfigured) {
-    container.innerHTML = '<div class="history-empty">Riwayat akan muncul di sini setelah backend Google Sheets terhubung (lihat README.md).</div>';
+    container.innerHTML = '<div class="history-empty">Riwayat presensi akan tampil di sini setelah server Google Sheets terhubung (lihat README.md).</div>';
     return;
   }
 
@@ -2126,7 +2332,7 @@ async function openHistory() {
     // belakang layar. Pesan error cuma ditunjukkan kalau memang belum ada
     // data apa pun yang bisa ditampilkan sama sekali.
     if (!cachedList || !cachedList.length) {
-      container.innerHTML = '<div class="history-empty">Gagal memuat riwayat. Periksa koneksi internet.</div>';
+      container.innerHTML = '<div class="history-empty">Gagal memuat riwayat presensi. Periksa koneksi internet kamu, lalu coba lagi.</div>';
     }
   }
 }
@@ -2148,7 +2354,7 @@ function renderHistory(list) {
   container.innerHTML = '';
 
   if (!list.length) {
-    container.innerHTML = '<div class="history-empty">Belum ada riwayat absensi.</div>';
+    container.innerHTML = '<div class="history-empty">Belum ada riwayat absensi yang tercatat.</div>';
     return;
   }
 
@@ -2246,6 +2452,32 @@ function showModal({ icon, title, message, actions }) {
   });
 
   overlay.classList.remove('hidden');
+}
+
+/* ============================================
+   LOADING OVERLAY GLOBAL
+   ------------------------------------------------
+   Dipakai membungkus SETIAP proses yang butuh waktu & berkomunikasi
+   dengan server (upload/ganti/hapus foto profil, hapus akun, kirim
+   absensi, tambah nama, dll) supaya user selalu tahu ada proses berjalan
+   di belakang layar, bukan app yang terlihat "diam"/macet. Support nested
+   call (loadingDepth) supaya kalau ada proses yang memanggil proses lain
+   di dalamnya, overlay baru tersembunyi setelah SEMUA proses selesai.
+   ============================================ */
+let loadingDepth = 0;
+function showLoading(message) {
+  loadingDepth++;
+  const overlay = document.getElementById('loading-overlay');
+  const textEl = document.getElementById('loading-overlay-text');
+  if (textEl) textEl.textContent = message || 'Memproses…';
+  if (overlay) overlay.classList.remove('hidden');
+}
+function hideLoading() {
+  loadingDepth = Math.max(0, loadingDepth - 1);
+  if (loadingDepth === 0) {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.classList.add('hidden');
+  }
 }
 
 let toastTimeout;

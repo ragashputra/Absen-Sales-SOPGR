@@ -43,6 +43,10 @@
  *   localStorage HP), supaya begitu karyawan buka app di HP/browser lain,
  *   foto profilnya SUDAH ADA dan tidak diminta ambil ulang. Foto lama
  *   (kalau ganti foto) otomatis dihapus dari Drive supaya tidak menumpuk.
+ * - Endpoint "deleteEmployee": menghapus akun karyawan secara PERMANEN —
+ *   baris di sheet Karyawan, foto profilnya, DAN seluruh riwayat absensi
+ *   (sheet Log) beserta foto selfie-nya di Drive. Dipanggil dari menu
+ *   "Hapus Akun" di layar Profil PWA. Tindakan ini tidak bisa dibatalkan.
  */
 
 const SHEET_KARYAWAN = 'Karyawan';
@@ -83,6 +87,7 @@ function doPost(e) {
     if (action === 'addEmployee') return jsonOut(addEmployee(payload.name, payload.branch));
     if (action === 'saveProfilePhoto') return jsonOut(saveProfilePhoto(payload.employeeId, payload.photoBase64, payload.employeeName, payload.employeeBranch));
     if (action === 'deleteProfilePhoto') return jsonOut(deleteProfilePhotoAction(payload.employeeId));
+    if (action === 'deleteEmployee') return jsonOut(deleteEmployeeAction(payload.employeeId));
     const result = recordAttendance(payload);
     return jsonOut(result);
   } catch (err) {
@@ -371,6 +376,76 @@ function deleteProfilePhotoAction(employeeId) {
     }
     sheet.getRange(targetRow, 4).setValue('');
     invalidateEmployeeCache();
+
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ============================================
+   HAPUS AKUN KARYAWAN (permanen, dari layar Profil PWA)
+   ------------------------------------------------
+   Menghapus SECARA PERMANEN dan tidak bisa dibatalkan:
+   1. Baris karyawan tersebut di sheet "Karyawan".
+   2. Foto profil-nya di Drive (kalau ada).
+   3. SEMUA baris riwayat absensi (sheet "Log") milik karyawan itu, beserta
+      foto selfie absen harian yang menyertainya di Drive.
+   Dibungkus lock + urutan hapus dari BAWAH ke ATAS pada sheet Log supaya
+   index baris tidak bergeser saat proses hapus berjalan (menghapus baris
+   dari atas akan mengubah nomor baris di bawahnya, rawan salah hapus).
+   Idempotent: dipanggil dua kali untuk employeeId yang sama tetap aman,
+   tidak error walau datanya sudah tidak ada (mis. retry jaringan).
+   ============================================ */
+function deleteEmployeeAction(employeeId) {
+  if (!employeeId) {
+    return { ok: false, error: 'employeeId tidak ada' };
+  }
+
+  const lock = LockService.getScriptLock();
+  const gotLock = lock.tryLock(15000);
+  if (!gotLock) {
+    return { ok: false, error: 'Sistem sedang sibuk, coba lagi sebentar' };
+  }
+
+  try {
+    // 1) Hapus baris + foto profil di sheet Karyawan (kalau masih ada)
+    const karyawanSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_KARYAWAN);
+    if (karyawanSheet) {
+      const rows = karyawanSheet.getDataRange().getValues();
+      for (let i = rows.length - 1; i >= 1; i--) {
+        if (String(rows[i][0]) === String(employeeId)) {
+          const oldPhotoUrl = String(rows[i][3] || '');
+          if (oldPhotoUrl) deleteProfilePhotoFile(oldPhotoUrl);
+          karyawanSheet.deleteRow(i + 1);
+        }
+      }
+    }
+
+    // 2) Hapus SEMUA baris Log + foto selfie absen harian milik karyawan ini.
+    //    Urut dari baris PALING BAWAH ke ATAS supaya deleteRow() berikutnya
+    //    tidak menggeser index baris yang belum diperiksa.
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOG);
+    if (logSheet) {
+      const lastRow = logSheet.getLastRow();
+      if (lastRow >= 2) {
+        const rows = logSheet.getRange(2, 1, lastRow - 1, 11).getValues();
+        for (let i = rows.length - 1; i >= 0; i--) {
+          if (String(rows[i][0]) === String(employeeId)) {
+            const photoUrl = String(rows[i][9] || '');
+            if (photoUrl) deleteProfilePhotoFile(photoUrl);
+            logSheet.deleteRow(i + 2); // +2: offset header (1) + offset getRange mulai baris 2
+          }
+        }
+      }
+    }
+
+    // 3) Bersihkan cache supaya endpoint "employees"/"today"/"history"/"home"
+    // berikutnya tidak lagi membawa data karyawan yang sudah dihapus.
+    invalidateEmployeeCache();
+    invalidateLogCache(employeeId);
 
     return { ok: true };
   } catch (err) {
