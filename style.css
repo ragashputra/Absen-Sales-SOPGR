@@ -564,19 +564,14 @@ input { font-family: inherit; }
 .nav-item.active .nav-item-icon svg { color: inherit; }
 .nav-item:active { transform: scale(0.92); }
 
-/* Tombol Keluar: KUNING/AMBER — beda dari warna aksi destruktif (merah,
-   dipakai khusus utk "Hapus Akun" yang permanen). Keluar cuma ganti pengguna
-   /logout biasa, jadi dikasih warna peringatan ringan (amber), bukan bahaya.
-   Warna disamakan skalanya persis dengan --amber-500 yang sudah dipakai di
-   tempat lain (mis. panel GPS "mencari sinyal"), supaya konsisten satu palet. */
+/* Tombol Keluar: MERAH — menandakan aksi keluar dari sesi/akun secara
+   jelas (konvensi umum: logout = warna bahaya/peringatan tegas), pakai
+   --red-500 yang sama dengan aksi hapus akun & elemen error lain di app
+   supaya konsisten satu palet, sama di light maupun dark mode. */
 .nav-item-logout,
-.nav-item-logout .nav-item-icon svg { color: var(--amber-500); }
-[data-theme="dark"] .nav-item-logout,
-[data-theme="dark"] .nav-item-logout .nav-item-icon svg { color: var(--brass-300); }
+.nav-item-logout .nav-item-icon svg { color: var(--red-500); }
 .nav-item-logout.active,
-.nav-item-logout.active .nav-item-icon svg { color: #B8862E; }
-[data-theme="dark"] .nav-item-logout.active,
-[data-theme="dark"] .nav-item-logout.active .nav-item-icon svg { color: #F0D9A0; }
+.nav-item-logout.active .nav-item-icon svg { color: var(--red-600); }
 
 /* ============ FAB — kamera premium, lingkaran bulat sempurna, ikon besar ============ */
 .nav-fab {
