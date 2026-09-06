@@ -433,8 +433,16 @@ function positionNavIndicators(target, animate) {
 
     const navRect = nav.getBoundingClientRect();
     const itemRect = activeItem.getBoundingClientRect();
-    const x = (itemRect.left - navRect.left) + NAV_PILL_INSET;
-    const w = itemRect.width - NAV_PILL_INSET * 2;
+    // Dibulatkan ke integer penuh (bukan dibiarkan pecahan/subpixel) SEBELUM
+    // dipakai untuk translateX & width. getBoundingClientRect sering
+    // menghasilkan nilai desimal (mis. 234.3984375px) tergantung device
+    // pixel ratio; kalau dibiarkan, browser boleh membulatkannya sendiri
+    // saat render — dan pembulatan itu TIDAK SELALU simetris kiri vs kanan,
+    // sehingga pill/icon di dalamnya bisa terlihat "geser" 1px ke satu sisi
+    // di device tertentu meski hasil hitungannya presisi. Membulatkan di
+    // sini membuat hasilnya konsisten & 100% presisi di semua device.
+    const x = Math.round((itemRect.left - navRect.left) + NAV_PILL_INSET);
+    const w = Math.round(itemRect.width - NAV_PILL_INSET * 2);
 
     if (!animate) indicator.classList.add('no-anim');
     indicator.style.width = `${w}px`;
