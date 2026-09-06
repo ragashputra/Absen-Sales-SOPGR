@@ -497,8 +497,19 @@ input { font-family: inherit; }
 .recent-history-empty { text-align: center; color: var(--text-tertiary); font-size: 13px; padding: 30px 20px; }
 .recent-history-loading .recent-day-group { position: relative; overflow: hidden; }
 
-/* ============ BOTTOM NAV — glass tab bar dengan pill "Liquid Glass" yang
-   meluncur di belakang tab aktif (gaya tab bar iOS terbaru) ============ */
+/* ============ BOTTOM NAV — glass tab bar dengan highlight solid per-tab
+   (CSS murni, TANPA pill terpisah yang perlu diukur & digeser via JS).
+   ------------------------------------------------
+   Sebelumnya dipakai 1 elemen ".nav-indicator" yang posisi & lebarnya
+   dihitung ulang tiap ganti tab lewat getBoundingClientRect() (JS). Itu
+   rawan meleset 1-2px di device tertentu karena diukur saat animasi
+   transisi layar (.screen scale-in) belum genap selesai, dan hasilnya
+   TIDAK SIMETRIS antar tab karena FAB kamera besar duduk di tengah bar.
+   Diganti total dengan pendekatan lebih robust: highlight background
+   ditaruh LANGSUNG di ".nav-item.active" itu sendiri lewat CSS biasa
+   (bukan elemen terpisah yang perlu di-translate) -> selalu presisi
+   100% mengikuti kotak tab-nya sendiri, di semua device, tanpa JS sama
+   sekali, tanpa kemungkinan geser/rounding error apa pun. ============ */
 .bottom-nav {
   position: absolute; left: 14px; right: 14px; bottom: calc(var(--safe-bottom) + 14px);
   display: flex; align-items: center;
@@ -513,43 +524,29 @@ input { font-family: inherit; }
   overflow: visible;
 }
 
-/* ============================================
-   NAV INDICATOR — pill "Liquid Glass" (gaya tab bar iOS terbaru): kapsul kaca
-   buram yang meluncur & melebar/menyempit mengikuti lebar tab yang dipilih.
-   Posisi & lebar-nya di-set lewat JS (app.js: positionNavIndicators) memakai
-   pengukuran DOM asli (getBoundingClientRect), BUKAN pembagian persentase
-   statis — supaya tetap presisi walau FAB kamera di tengah bar lebarnya beda
-   sendiri dari tab yang lain. Dua lapis blur (bar + pill) menghasilkan efek
-   kaca berlapis yang jadi ciri khas Liquid Glass.
-   ============================================ */
-.nav-indicator {
-  position: absolute;
-  top: 6px; bottom: 6px; left: 0;
-  border-radius: 17px;
-  background: var(--nav-pill-bg);
-  border: 1px solid var(--nav-pill-border);
-  box-shadow: var(--nav-pill-shadow);
-  backdrop-filter: blur(18px) saturate(1.5);
-  -webkit-backdrop-filter: blur(18px) saturate(1.5);
-  transition: transform 0.42s var(--ease-spring), width 0.42s var(--ease-spring);
-  will-change: transform;
-  pointer-events: none;
-  z-index: 0;
-}
-/* Dipasang sesaat oleh JS pas posisi awal/resize di-set ulang, supaya
-   perpindahannya SNAP instan (tidak ikut animasi geser dari pojok). */
-.nav-indicator.no-anim { transition: none; }
-
 .nav-item {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
   color: var(--text-tertiary); font-size: 11.5px; font-weight: 600;
   padding: 6px 4px; letter-spacing: 0.005em;
-  border-radius: 16px;
+  border-radius: 17px;
   position: relative; z-index: 1;
   flex: 1;
   min-width: 0;
   height: 56px;
-  transition: color 0.18s ease, transform 0.15s var(--ease-spring);
+  margin: 0 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: color 0.18s ease, transform 0.15s var(--ease-spring), background-color 0.24s var(--ease-out), border-color 0.24s var(--ease-out), box-shadow 0.24s var(--ease-out);
+}
+/* Highlight tab aktif: background + border NEMPEL LANGSUNG di kotak tab
+   itu sendiri (bukan elemen overlay terpisah) -> otomatis selalu pas &
+   center sempurna terhadap isi tab (icon+teks), apa pun lebar tab-nya,
+   tanpa perlu diukur sama sekali. Ini yang menghilangkan sepenuhnya kelas
+   bug "pill geser/tidak center" yang sebelumnya terjadi. */
+.nav-item.active {
+  background: var(--nav-pill-bg);
+  border-color: var(--nav-pill-border);
+  box-shadow: var(--nav-pill-shadow);
 }
 .nav-item-icon {
   display: flex; align-items: center; justify-content: center;
@@ -560,8 +557,8 @@ input { font-family: inherit; }
 .nav-item svg { display: block; transition: transform 0.22s var(--ease-spring), color 0.18s ease; }
 .nav-item span:last-child { line-height: 1; white-space: nowrap; transition: color 0.18s ease; }
 
-/* Item aktif: warnanya berpindah ke brass DAN duduk di atas pill kaca yang
-   meluncur (.nav-indicator) — persis gaya tab bar iOS terbaru. */
+/* Item aktif: warna berpindah ke brass, background pill-nya sudah diatur
+   di rule .nav-item.active pada blok BOTTOM NAV di atas. */
 .nav-item.active { color: var(--brass-600); }
 [data-theme="dark"] .nav-item.active { color: var(--brass-400); }
 .nav-item.active .nav-item-icon svg { color: inherit; }
@@ -1325,10 +1322,7 @@ button:focus-visible, input:focus-visible {
 .recent-day-group { transition: transform 0.15s var(--ease-spring), box-shadow 0.15s ease; }
 .recent-day-group:active { transform: scale(0.985); }
 
-/* ---- Bottom nav: transisi lebih hidup (indicator geser via .nav-indicator) ---- */
-.nav-item {
-  transition: color 0.2s ease, transform 0.15s var(--ease-spring);
-}
+/* ---- Bottom nav: transisi warna/scale saat tekan & pindah tab ---- */
 .nav-item:active { transform: scale(0.92); }
 .nav-fab { transition: transform 0.16s var(--ease-spring), box-shadow 0.2s ease; }
 .nav-fab:hover { box-shadow: 0 12px 26px -8px rgba(191,151,82,0.65), inset 0 1px 0 rgba(255,255,255,0.32); }
@@ -1410,7 +1404,7 @@ button:focus-visible, input:focus-visible {
   .sheet-option, .preview-info, .success-mark,
   .success-title, .success-sub, .btn-full,
   .profile-hero-avatar, .profile-section-label, .theme-switch, .profile-logout-btn,
-  .nav-indicator, .theme-switch-indicator,
+  .theme-switch-indicator,
   .loading-box {
     animation: none !important;
   }

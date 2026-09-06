@@ -26,7 +26,7 @@ const state = {
   todayStatus: { masuk: null, keluar: null },
   timestampInterval: null,
   submitting: false,
-  currentNavTarget: null // 'home' | 'profile' | 'history' — dipakai reposisi pill nav pas resize/rotate
+  currentNavTarget: null // 'home' | 'profile' | 'history' — tab bottom-nav yang sedang aktif
 };
 
 const STORAGE_KEY = 'absen_employee';
@@ -381,16 +381,24 @@ function closeAbsenSheet() {
   }, 260); // cocok dengan durasi transform sheet-box (0.26s)
 }
 
-const NAV_PILL_INSET = 4; // px — pill sedikit lebih ramping dari kotak tap target aslinya, kesan kapsul kaca yang lebih rapi
-
-function setBottomNavActive(target, options) {
+function setBottomNavActive(target) {
   // target: 'home' | 'history' | 'profile' — mengatur SEMUA salinan nav
-  // (muncul di screen-home, screen-history, screen-profile) sekaligus,
-  // termasuk menggeser indicator pill aktif ke posisi tab yang benar.
+  // (muncul di screen-home, screen-history, screen-profile) sekaligus.
   // Catatan: "Keluar" BUKAN target navigasi (dia cuma tombol aksi/modal),
-  // jadi tidak pernah ikut dihitung di sini — indicator tidak akan pernah
-  // nyasar ke slot Keluar.
-  const animate = !options || options.animate !== false;
+  // jadi tidak pernah ikut ditandai aktif di sini.
+  //
+  // CATATAN DESAIN: highlight tab aktif SEKARANG murni CSS (lihat
+  // .nav-item.active di style.css) — background/border/shadow pill
+  // langsung menempel di kotak tab itu sendiri, bukan elemen overlay
+  // terpisah yang posisinya perlu dihitung & digeser pakai JS. Sebelumnya
+  // dipakai pill mengambang (.nav-indicator) yang diukur lewat
+  // getBoundingClientRect() tiap ganti tab — pendekatan itu rawan meleset
+  // 1-2px di device tertentu (terutama saat diukur bersamaan dengan
+  // animasi transisi layar yang belum genap selesai) dan sudah dicoba
+  // diperbaiki berkali-kali tanpa hasil yang 100% stabil di semua device.
+  // Pendekatan CSS murni ini TIDAK MUNGKIN meleset karena tidak ada
+  // pengukuran/pemindahan sama sekali — browser yang urus penuh via layout
+  // engine native, selalu presisi 1:1 dengan kotak tab, di semua device.
   state.currentNavTarget = target;
 
   document.querySelectorAll('.nav-item:not(.nav-item-logout)').forEach(el => {
@@ -403,63 +411,7 @@ function setBottomNavActive(target, options) {
       (target === 'profile' && isProfile)
     );
   });
-
-  // Posisi pill DITUNDA ke frame berikutnya (bukan dihitung langsung di sini).
-  // Kenapa: fungsi ini sering dipanggil SEBELUM showScreen() (mis. di klik
-  // tab Riwayat) — kalau posisi diukur sekarang juga, layar tujuan mungkin
-  // masih tersembunyi (display:none) sehingga getBoundingClientRect-nya 0.
-  // Menunggu 1 frame memastikan showScreen() yang menyusul sudah pasti
-  // selesai jalan lebih dulu, jadi pengukuran selalu akurat kapan pun urutan
-  // pemanggilannya.
-  requestAnimationFrame(() => positionNavIndicators(target, animate));
 }
-
-// Menggeser & melebarkan pill kaca (.nav-indicator) di SETIAP salinan bottom-nav
-// supaya persis menutupi tab yang sedang aktif — diukur langsung dari DOM
-// (bukan hitungan persentase slot statis), supaya tetap presisi walau FAB
-// kamera di tengah bar lebarnya beda sendiri dari nav-item yang lain.
-function positionNavIndicators(target, animate) {
-  const selector = target === 'home' ? '[id^="nav-home"]'
-    : target === 'profile' ? '[id^="nav-profile"]'
-    : '[id^="nav-history"]';
-
-  document.querySelectorAll('.bottom-nav').forEach(nav => {
-    const indicator = nav.querySelector('.nav-indicator');
-    const activeItem = nav.querySelector(selector);
-    if (!indicator || !activeItem) return;
-    // Lewati bar yang layarnya sedang tidak terlihat — rect-nya pasti 0 kalau
-    // dipaksa dipakai, malah bikin pill "melompat" ke pojok kiri atas.
-    if (activeItem.offsetParent === null) return;
-
-    const navRect = nav.getBoundingClientRect();
-    const itemRect = activeItem.getBoundingClientRect();
-    // Dibulatkan ke integer penuh (bukan dibiarkan pecahan/subpixel) SEBELUM
-    // dipakai untuk translateX & width. getBoundingClientRect sering
-    // menghasilkan nilai desimal (mis. 234.3984375px) tergantung device
-    // pixel ratio; kalau dibiarkan, browser boleh membulatkannya sendiri
-    // saat render — dan pembulatan itu TIDAK SELALU simetris kiri vs kanan,
-    // sehingga pill/icon di dalamnya bisa terlihat "geser" 1px ke satu sisi
-    // di device tertentu meski hasil hitungannya presisi. Membulatkan di
-    // sini membuat hasilnya konsisten & 100% presisi di semua device.
-    const x = Math.round((itemRect.left - navRect.left) + NAV_PILL_INSET);
-    const w = Math.round(itemRect.width - NAV_PILL_INSET * 2);
-
-    if (!animate) indicator.classList.add('no-anim');
-    indicator.style.width = `${w}px`;
-    indicator.style.transform = `translateX(${x}px)`;
-    if (!animate) {
-      void indicator.offsetWidth; // paksa reflow supaya class no-anim benar2 berlaku dulu
-      requestAnimationFrame(() => indicator.classList.remove('no-anim'));
-    }
-  });
-}
-
-// Kalau layar diputar / lebar viewport berubah, ukuran & posisi tab ikut
-// berubah — reposisikan pill tanpa animasi (snap instan) supaya tidak
-// nyangkut di posisi/lebar lama.
-window.addEventListener('resize', () => {
-  if (state.currentNavTarget) positionNavIndicators(state.currentNavTarget, false);
-});
 
 function attachConnectivityListeners() {
   window.addEventListener('online', () => {
@@ -1162,7 +1114,7 @@ function selectEmployee(emp) {
   document.getElementById('profile-name').textContent = emp.name;
   document.getElementById('profile-branch').textContent = emp.branch || CONFIG.COMPANY_NAME;
   renderAvatar(emp);
-  setBottomNavActive('home', { animate: false });
+  setBottomNavActive('home');
   showScreen('screen-home');
   refreshHome();
   flushPendingQueue();
