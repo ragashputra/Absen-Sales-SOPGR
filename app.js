@@ -155,6 +155,9 @@ function attachEventListeners() {
   document.getElementById('input-new-employee-name').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); onConfirmAddEmployee(); }
   });
+  document.getElementById('input-new-employee-branch').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); onConfirmAddEmployee(); }
+  });
   document.getElementById('btn-logout').addEventListener('click', onLogout);
   document.getElementById('btn-camera-close').addEventListener('click', closeCamera);
   document.getElementById('btn-shutter').addEventListener('click', capturePhoto);
@@ -469,8 +472,10 @@ function onSearchInput(e) {
    ============================================ */
 function openAddEmployeeModal() {
   const input = document.getElementById('input-new-employee-name');
+  const branchInput = document.getElementById('input-new-employee-branch');
   const errorEl = document.getElementById('add-employee-error');
   input.value = '';
+  branchInput.value = '';
   input.classList.remove('input-error');
   errorEl.classList.add('hidden');
   errorEl.textContent = '';
@@ -496,6 +501,7 @@ async function onConfirmAddEmployee() {
 
   const input = document.getElementById('input-new-employee-name');
   const name = input.value.trim().replace(/\s+/g, ' ');
+  const branch = document.getElementById('input-new-employee-branch').value.trim().replace(/\s+/g, ' ');
 
   if (!name) {
     setAddEmployeeError('Nama tidak boleh kosong.');
@@ -526,7 +532,7 @@ async function onConfirmAddEmployee() {
 
   try {
     if (!isBackendConfigured() || !navigator.onLine) {
-      queueEmployeeOffline(name);
+      queueEmployeeOffline(name, branch);
       closeAddEmployeeModal();
       showToast('Kamu sedang offline — nama disimpan & akan disinkronkan otomatis nanti.');
       return;
@@ -538,7 +544,7 @@ async function onConfirmAddEmployee() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // hindari CORS preflight ke Apps Script
-          body: JSON.stringify({ action: 'addEmployee', name })
+          body: JSON.stringify({ action: 'addEmployee', name, branch })
         },
         12000
       );
@@ -561,7 +567,7 @@ async function onConfirmAddEmployee() {
       // Gagal karena jaringan (timeout/offline mendadak) -> jangan buang
       // input user, simpan sebagai pending supaya tetap bisa dipakai & akan
       // otomatis dicoba lagi begitu online.
-      queueEmployeeOffline(name);
+      queueEmployeeOffline(name, branch);
       closeAddEmployeeModal();
       showToast('Jaringan bermasalah — nama disimpan & akan disinkronkan otomatis nanti.');
     }
@@ -573,13 +579,13 @@ async function onConfirmAddEmployee() {
   }
 }
 
-function queueEmployeeOffline(name) {
+function queueEmployeeOffline(name, branch) {
   const localId = 'local_' + Date.now();
   const queue = readEmployeeQueue();
-  queue.push({ localId, name, branch: '', queuedAt: Date.now() });
+  queue.push({ localId, name, branch: branch || '', queuedAt: Date.now() });
   writeEmployeeQueue(queue);
 
-  const emp = { id: localId, name, branch: '', pending: true };
+  const emp = { id: localId, name, branch: branch || '', pending: true };
   state.employees.push(emp);
   renderEmployeeList(state.employees);
   selectEmployee(emp);
