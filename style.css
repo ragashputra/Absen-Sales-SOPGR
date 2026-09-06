@@ -350,7 +350,13 @@ input { font-family: inherit; }
   font-weight: 700; font-size: 14px; flex-shrink: 0;
   letter-spacing: 0.01em;
   overflow: hidden; /* wajib supaya foto (object-fit: cover) tidak meluber keluar sudut rounded */
+  transition: transform 0.15s var(--ease-spring), filter 0.15s ease;
 }
+/* Tap avatar untuk preview foto (hanya kalau ada foto asli, bukan
+   inisial) -> beri sedikit feedback tekan supaya terasa "tappable"
+   terpisah dari sisa row (yang membuka halaman kamera). */
+.employee-avatar.has-photo { cursor: pointer; }
+.employee-avatar.has-photo:active { transform: scale(0.9); filter: brightness(0.92); }
 .employee-avatar.has-photo { background: var(--surface-strong); } /* fallback warna netral selagi <img> masih memuat */
 .employee-avatar img {
   width: 100%; height: 100%; object-fit: cover; display: block;
@@ -879,7 +885,12 @@ input { font-family: inherit; }
   margin-bottom: 14px;
   animation: avatar-in 0.4s var(--ease-spring);
   overflow: hidden; position: relative;
+  transition: transform 0.15s var(--ease-spring), filter 0.15s ease;
 }
+/* Sama seperti avatar di list nama: tap untuk preview, hanya kalau foto
+   asli sudah terpasang (bukan inisial). */
+.profile-hero-avatar.has-photo { cursor: pointer; }
+.profile-hero-avatar.has-photo:active { transform: scale(0.94); filter: brightness(0.92); }
 .profile-hero-name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
 .profile-hero-branch { font-size: 13px; color: var(--text-tertiary); margin-top: 4px; }
 
@@ -1394,4 +1405,66 @@ button:focus-visible, input:focus-visible {
   .loading-box {
     animation: none !important;
   }
+}
+
+/* ============================================
+   LIGHTBOX PREVIEW FOTO PROFIL (ala Facebook)
+   ------------------------------------------------
+   - Backdrop gelap solid + blur ringan, foto membesar dari titik avatar
+     asal (scale+fade), bisa ditutup lewat: tap backdrop, tombol X, atau
+     geser (drag) foto ke bawah.
+   - z-index 900: di atas SEMUA modal (600/700) tapi di bawah splash (999).
+   - Kalau avatar yang di-tap belum punya foto asli (masih inisial),
+     lightbox tidak pernah dipanggil sama sekali (dicegah di app.js) —
+     jadi CSS di sini murni untuk kondisi ada foto.
+   ============================================ */
+.photo-lightbox {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(6,7,9,0.92);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 24px;
+  opacity: 1; transition: opacity 0.24s var(--ease-out);
+  touch-action: none;
+}
+.photo-lightbox.hidden { opacity: 0; pointer-events: none; }
+.photo-lightbox-stage {
+  position: relative; max-width: 92vw; max-height: 72vh;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.22s var(--ease-spring), opacity 0.22s var(--ease-out);
+  will-change: transform;
+}
+.photo-lightbox.opening .photo-lightbox-stage { animation: lightbox-zoom-in 0.32s var(--ease-spring); }
+.photo-lightbox-stage img {
+  max-width: 92vw; max-height: 72vh; width: auto; height: auto;
+  border-radius: 18px; display: block; object-fit: contain;
+  box-shadow: 0 30px 70px -20px rgba(0,0,0,0.6);
+  background: var(--ink-900);
+}
+.photo-lightbox-initials {
+  width: 220px; height: 220px; border-radius: 50%;
+  background: linear-gradient(155deg, var(--ink-800), var(--ink-950));
+  color: var(--brass-400); font-weight: 700; font-size: 64px; letter-spacing: 0.01em;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 30px 70px -20px rgba(0,0,0,0.6);
+}
+.photo-lightbox-initials.hidden { display: none; }
+.photo-lightbox-close {
+  position: absolute; top: max(18px, env(safe-area-inset-top)); right: 18px;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(255,255,255,0.12); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  border: none; cursor: pointer; z-index: 2;
+  transition: transform 0.15s var(--ease-spring), background 0.15s ease;
+}
+.photo-lightbox-close:active { transform: scale(0.88); background: rgba(255,255,255,0.2); }
+.photo-lightbox-caption {
+  margin-top: 18px; color: rgba(255,255,255,0.75); font-size: 14px; font-weight: 600;
+  letter-spacing: 0.01em; text-align: center; padding: 0 20px;
+}
+@keyframes lightbox-zoom-in {
+  from { transform: scale(0.55); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .photo-lightbox, .photo-lightbox-stage { transition: none !important; animation: none !important; }
 }

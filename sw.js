@@ -2,7 +2,7 @@
 
 // Naikkan versi ini setiap kali file di-update & di-redeploy, supaya cache lama
 // otomatis dibuang dan semua HP karyawan langsung dapat versi terbaru.
-const CACHE_NAME = 'absensi-v18';
+const CACHE_NAME = 'absensi-v19';
 
 // File yang JARANG berubah (aman di-cache-first, biar buka instan & tetap
 // bisa dipakai offline).

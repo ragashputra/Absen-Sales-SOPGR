@@ -239,6 +239,7 @@ function attachEventListeners() {
   document.getElementById('btn-start-profile-photo').addEventListener('click', startProfilePhotoCapture);
   document.getElementById('btn-edit-profile-photo').addEventListener('click', onEditProfilePhotoClick);
   document.getElementById('btn-remove-profile-photo').addEventListener('click', onRemoveProfilePhotoClick);
+  initPhotoLightbox();
 
   // Bottom nav — ada 3 salinan (di screen-home, screen-history & screen-profile)
   // supaya nav selalu tampil di setiap layar; semuanya terhubung ke fungsi yang sama.
@@ -669,7 +670,7 @@ function renderEmployeeList(list) {
       ? `<img src="${escapeHtml(photo)}" alt="${escapeHtml(emp.name)}" loading="lazy">`
       : initials(emp.name);
     btn.innerHTML = `
-      <div class="employee-avatar${photo ? ' has-photo' : ''}">${avatarInner}</div>
+      <div class="employee-avatar${photo ? ' has-photo' : ''}" data-role="avatar-preview">${avatarInner}</div>
       <div class="employee-info">
         <div class="employee-name">${escapeHtml(emp.name)}</div>
         <div class="employee-branch">${branchLine}</div>
@@ -677,6 +678,18 @@ function renderEmployeeList(list) {
       <svg class="employee-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     `;
     btn.addEventListener('click', () => selectEmployee(emp));
+    // Tap avatar SAJA (bukan seluruh baris) untuk preview foto ala Facebook.
+    // stopPropagation wajib supaya tap ini tidak ikut men-trigger klik baris
+    // (yang fungsinya memilih nama & lanjut ke absen) -> dua aksi berbeda,
+    // tidak boleh saling menimpa. Hanya aktif kalau memang sudah ada foto
+    // asli; avatar berisi inisial tetap murni bagian dari tombol pilih nama.
+    if (photo) {
+      const avatarEl = btn.querySelector('[data-role="avatar-preview"]');
+      avatarEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openPhotoLightbox(photo, emp.name);
+      });
+    }
     frag.appendChild(btn);
   });
   container.appendChild(frag);
@@ -969,6 +982,9 @@ function renderAvatar(emp) {
     }
     const span = document.getElementById(textEl);
     if (span) span.textContent = emp ? initials(emp.name) : '—';
+    // Sinkronkan class has-photo supaya cursor:pointer & efek tekan CSS
+    // hanya aktif ketika memang ada foto asli untuk di-preview.
+    el.classList.toggle('has-photo', !!photo);
   });
 
   // Tombol hapus foto di layar Profil: HANYA tampil kalau foto profil
@@ -977,7 +993,158 @@ function renderAvatar(emp) {
   // permintaan: yang belum ada fotonya tidak dikasih opsi hapus.
   const removeBtn = document.getElementById('btn-remove-profile-photo');
   if (removeBtn) removeBtn.classList.toggle('hidden', !photo);
+
+  // Simpan foto & nama terkini di avatar hero profil untuk dipakai listener
+  // tap-preview (lihat initPhotoLightbox) tanpa perlu baca ulang state.
+  const heroAvatar = document.getElementById('profile-avatar');
+  if (heroAvatar) {
+    heroAvatar.dataset.photo = photo || '';
+    heroAvatar.dataset.name = emp ? emp.name : '';
+  }
 }
+
+/* ============================================
+   LIGHTBOX PREVIEW FOTO PROFIL (ala Facebook)
+   ------------------------------------------------
+   - Dipanggil dari: avatar di list pilih nama (screen-login) & avatar
+     hero di halaman Profil. HANYA aktif kalau foto sudah tersedia
+     (avatar berisi inisial tidak pernah membuka lightbox).
+   - Tutup lewat: tombol X, tap area backdrop (di luar foto), geser (drag)
+     foto ke bawah melewati ambang batas, atau tombol back Android/browser
+     (lewat history.pushState supaya balik dulu ke halaman sebelumnya,
+     bukan keluar app).
+   - Robust terhadap: gambar gagal dimuat (jatuh ke inisial), device tanpa
+     dukungan pointer events (fallback ke touch/mouse listener terpisah),
+     dan prefers-reduced-motion (animasi dimatikan lewat CSS).
+   ============================================ */
+let lightboxDragState = null;
+let lightboxOpenedWithHistory = false;
+
+function initPhotoLightbox() {
+  const overlay = document.getElementById('photo-lightbox');
+  const stage = document.getElementById('photo-lightbox-stage');
+  const closeBtn = document.getElementById('photo-lightbox-close');
+  if (!overlay || !stage || !closeBtn) return;
+
+  closeBtn.addEventListener('click', closePhotoLightbox);
+
+  // Tap di area backdrop (bukan di atas foto/tombol) -> tutup.
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closePhotoLightbox();
+  });
+
+  // Tap avatar profil (hero) untuk preview — hanya jika ada foto asli.
+  const heroAvatar = document.getElementById('profile-avatar');
+  if (heroAvatar) {
+    heroAvatar.addEventListener('click', () => {
+      const photo = heroAvatar.dataset.photo;
+      if (photo) openPhotoLightbox(photo, heroAvatar.dataset.name || '');
+    });
+  }
+
+  // Geser (drag) foto ke bawah untuk menutup, gaya galeri foto native.
+  // Pakai Pointer Events (didukung luas di Safari iOS 13+ & semua Android
+  // modern) dengan fallback aman: kalau tidak didukung, drag-to-dismiss
+  // cukup dilewati -> tap X / backdrop tetap selalu berfungsi.
+  if (window.PointerEvent) {
+    stage.addEventListener('pointerdown', onLightboxDragStart);
+    stage.addEventListener('pointermove', onLightboxDragMove);
+    stage.addEventListener('pointerup', onLightboxDragEnd);
+    stage.addEventListener('pointercancel', onLightboxDragEnd);
+  }
+}
+
+function onLightboxDragStart(e) {
+  lightboxDragState = { startY: e.clientY, currentY: e.clientY, dragging: true };
+  const stage = e.currentTarget;
+  stage.setPointerCapture(e.pointerId);
+  stage.style.transition = 'none';
+}
+function onLightboxDragMove(e) {
+  if (!lightboxDragState || !lightboxDragState.dragging) return;
+  lightboxDragState.currentY = e.clientY;
+  const dy = Math.max(0, lightboxDragState.currentY - lightboxDragState.startY); // hanya izinkan geser ke bawah
+  const stage = e.currentTarget;
+  stage.style.transform = `translateY(${dy}px) scale(${Math.max(0.85, 1 - dy / 800)})`;
+  const overlay = document.getElementById('photo-lightbox');
+  overlay.style.background = `rgba(6,7,9,${Math.max(0.3, 0.92 - dy / 400)})`;
+}
+function onLightboxDragEnd(e) {
+  if (!lightboxDragState) return;
+  const dy = Math.max(0, lightboxDragState.currentY - lightboxDragState.startY);
+  const stage = e.currentTarget;
+  stage.style.transition = '';
+  const overlay = document.getElementById('photo-lightbox');
+  overlay.style.background = '';
+  if (dy > 110) {
+    closePhotoLightbox();
+  } else {
+    stage.style.transform = ''; // kembali ke posisi semula (drag belum cukup jauh)
+  }
+  lightboxDragState = null;
+}
+
+function openPhotoLightbox(photoUrl, name) {
+  const overlay = document.getElementById('photo-lightbox');
+  const img = document.getElementById('photo-lightbox-img');
+  const initialsEl = document.getElementById('photo-lightbox-initials');
+  const caption = document.getElementById('photo-lightbox-caption');
+  if (!overlay || !img) return;
+
+  img.classList.remove('hidden');
+  initialsEl.classList.add('hidden');
+  img.src = photoUrl;
+  // Fallback kalau URL foto ternyata gagal dimuat (mis. link Drive expired
+  // atau offline) -> tampilkan inisial daripada gambar rusak/kosong.
+  img.onerror = () => {
+    img.classList.add('hidden');
+    initialsEl.textContent = initials(name || '?');
+    initialsEl.classList.remove('hidden');
+  };
+  caption.textContent = name || '';
+
+  overlay.classList.remove('hidden');
+  overlay.classList.add('opening');
+  overlay.setAttribute('aria-hidden', 'false');
+  setTimeout(() => overlay.classList.remove('opening'), 340);
+
+  // Dorong 1 state history supaya tombol back HP/browser menutup lightbox
+  // dulu (bukan langsung keluar halaman/app) — pola umum di PWA modern.
+  try {
+    history.pushState({ lightbox: true }, '');
+    lightboxOpenedWithHistory = true;
+  } catch (e) {
+    lightboxOpenedWithHistory = false;
+  }
+}
+
+function closePhotoLightbox() {
+  const overlay = document.getElementById('photo-lightbox');
+  if (!overlay || overlay.classList.contains('hidden')) return;
+  overlay.classList.add('hidden');
+  overlay.setAttribute('aria-hidden', 'true');
+  const stage = document.getElementById('photo-lightbox-stage');
+  if (stage) stage.style.transform = '';
+  overlay.style.background = '';
+
+  if (lightboxOpenedWithHistory) {
+    lightboxOpenedWithHistory = false;
+    // Hanya mundur kalau state saat ini memang milik lightbox -> mencegah
+    // "menelan" satu langkah back yang tidak semestinya kalau closePhotoLightbox
+    // dipanggil dari sumber lain (bukan dari event popstate).
+    if (history.state && history.state.lightbox) history.back();
+  }
+}
+
+// Tombol back HP/browser saat lightbox terbuka -> tutup lightbox saja,
+// bukan navigasi keluar dari layar app yang sedang aktif.
+window.addEventListener('popstate', () => {
+  const overlay = document.getElementById('photo-lightbox');
+  if (overlay && !overlay.classList.contains('hidden')) {
+    lightboxOpenedWithHistory = false; // history sudah mundur duluan oleh browser, jangan mundur lagi
+    closePhotoLightbox();
+  }
+});
 
 function selectEmployee(emp) {
   state.employee = emp;

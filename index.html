@@ -547,6 +547,20 @@
   </div>
 </div>
 
+<!-- ===== LIGHTBOX: PREVIEW FOTO PROFIL (ala Facebook) =====
+     Dipicu dari avatar di list pilih nama & avatar di halaman Profil.
+     Tap backdrop, tombol X, geser ke bawah, atau tombol back HP -> tutup. -->
+<div id="photo-lightbox" class="photo-lightbox hidden" aria-hidden="true">
+  <button class="photo-lightbox-close" id="photo-lightbox-close" aria-label="Tutup preview foto" type="button">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+  </button>
+  <div class="photo-lightbox-stage" id="photo-lightbox-stage">
+    <img id="photo-lightbox-img" src="" alt="Foto profil">
+    <div class="photo-lightbox-initials hidden" id="photo-lightbox-initials"></div>
+  </div>
+  <div class="photo-lightbox-caption" id="photo-lightbox-caption"></div>
+</div>
+
 <script src="config.js"></script>
 <script src="app.js"></script>
 </body>
