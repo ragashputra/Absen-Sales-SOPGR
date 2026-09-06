@@ -457,8 +457,33 @@ function startClock() {
 function updateClock() {
   const now = new Date();
   const timeEl = document.getElementById('live-clock');
+  const ampmEl = document.getElementById('live-clock-ampm');
   const dateEl = document.getElementById('home-date');
-  if (timeEl) timeEl.textContent = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: TZ });
+
+  if (timeEl && ampmEl) {
+    // Pakai formatToParts (bukan toLocaleTimeString biasa) supaya jam,
+    // menit, detik, dan AM/PM bisa diambil TERPISAH lalu disusun ulang
+    // sendiri -> robust di semua browser/locale, tidak bergantung pada
+    // urutan/format string bawaan locale tertentu yang bisa beda-beda
+    // (ada yang taruh AM/PM di depan, ada yang beri spasi berbeda, dst).
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true, timeZone: TZ
+      }).formatToParts(now);
+      const get = (type) => parts.find(p => p.type === type)?.value || '';
+      const hour = get('hour').padStart(2, '0');
+      const minute = get('minute');
+      const second = get('second');
+      const dayPeriod = get('dayPeriod').toUpperCase(); // "AM" / "PM"
+      timeEl.textContent = `${hour}.${minute}.${second}`;
+      ampmEl.textContent = dayPeriod;
+    } catch (e) {
+      // Fallback kalau formatToParts/hour12 tidak didukung (sangat jarang) —
+      // tetap tampilkan sesuatu yang masuk akal daripada layar kosong.
+      timeEl.textContent = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: TZ });
+      ampmEl.textContent = '';
+    }
+  }
   if (dateEl) dateEl.textContent = now.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
   updateLoginGreeting(now);
 }

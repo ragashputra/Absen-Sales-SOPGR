@@ -419,14 +419,34 @@ input { font-family: inherit; }
 }
 
 .datetime-card {
-  display: flex; align-items: center; justify-content: center; gap: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); padding: 13px 16px; margin: 6px 0 18px;
-  font-size: 13.5px; color: var(--text-secondary); font-weight: 500;
+  border-radius: var(--radius-md); padding: 16px 16px 18px; margin: 6px 0 18px;
 }
-.datetime-card #home-date { text-transform: capitalize; }
-.datetime-divider { width: 1px; height: 14px; background: var(--surface-strong); flex-shrink: 0; }
-.datetime-clock { font-family: var(--font-mono); font-weight: 700; color: var(--text-primary); letter-spacing: 0.01em; }
+.datetime-date {
+  font-size: 13px; color: var(--text-tertiary); font-weight: 600;
+  text-transform: capitalize; letter-spacing: 0.01em;
+}
+/* Jam adalah elemen UTAMA di kartu ini (permintaan: paling menonjol supaya
+   user langsung tahu jam berapa sekarang tanpa harus mencari-cari) — font
+   jauh lebih besar dari tanggal, AM/PM ditempel di sebelah kanan bawah
+   angka jam (bukan di baris terpisah) supaya tetap terbaca sebagai satu
+   kesatuan "jam saat ini", gaya jam digital fisik pada umumnya. */
+.datetime-clock-row {
+  display: flex; align-items: baseline; justify-content: center; gap: 6px;
+  margin-top: 2px;
+}
+.datetime-clock {
+  font-family: var(--font-mono); font-weight: 700; color: var(--text-primary);
+  letter-spacing: 0.01em; font-size: 40px; line-height: 1;
+  font-variant-numeric: tabular-nums; /* angka detik berganti tanpa bikin lebar teks "bergoyang" */
+}
+.datetime-ampm {
+  font-family: var(--font-mono); font-weight: 700; color: var(--brass-600);
+  font-size: 15px; letter-spacing: 0.03em; text-transform: uppercase;
+  padding-bottom: 3px; /* sejajarkan optik dengan baseline angka jam yang besar */
+}
+[data-theme="dark"] .datetime-ampm { color: var(--brass-400); }
 
 .status-rail { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 26px; }
 .status-card {
