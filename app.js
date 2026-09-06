@@ -1335,7 +1335,7 @@ function renderTodayStatus(data) {
     const t = safeTimeText(data.masuk.time);
     cardMasuk.classList.add('filled');
     document.getElementById('status-masuk-time').textContent = t;
-    windowMasuk.textContent = `Tercatat ${t} WIB`;
+    windowMasuk.innerHTML = `Tercatat ${t} WIB${data.masuk.status ? ' ' + renderStatusBadge(data.masuk.status) : ''}`;
     windowMasuk.title = data.masuk.address || '';
   } else {
     cardMasuk.classList.remove('filled');
@@ -2437,8 +2437,11 @@ function showSuccess(data) {
   const type = state.currentType;
   document.getElementById('success-title').textContent =
     type === 'masuk' ? 'Absensi Masuk Berhasil' : 'Absensi Keluar Berhasil';
+  const statusText = (type === 'masuk' && data.data.status)
+    ? (data.data.status === 'ontime' ? ' · Tepat Waktu' : ' · Terlambat')
+    : '';
   document.getElementById('success-sub').textContent =
-    `Tercatat pukul ${safeTimeText(data.data.time)} WIB · ${data.data.address}`;
+    `Tercatat pukul ${safeTimeText(data.data.time)} WIB${statusText} · ${data.data.address}`;
   showScreen('screen-success');
 }
 
@@ -2490,13 +2493,35 @@ function renderRecentRow(kind, label, entry) {
     ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 3H19a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M15 12H3" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>'
     : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 3H5a2 2 0 00-2 2v14a2 2 0 002 2h4M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const time = entry ? safeTimeText(entry.time) : '—';
+  // Badge telat/tepat waktu: cuma utk absen Masuk yang sudah tercatat DAN
+  // backend berhasil menghitung statusnya. Absen Keluar (kind 'out') dan
+  // baris yang belum diisi tidak pernah dapat badge — bukan hal yang relevan
+  // dinilai, sesuai kebijakan: telat/ontime hanya berlaku utk jam Masuk.
+  const statusBadge = (kind === 'in' && entry && entry.status) ? renderStatusBadge(entry.status) : '';
   return `
     <div class="recent-row">
       <span class="recent-row-icon ${kind}">${icon}</span>
       <span class="recent-row-label">${label}</span>
+      ${statusBadge}
       <span class="recent-row-time">${time}</span>
     </div>
   `;
+}
+
+// Badge kecil "Tepat Waktu" (hijau, senada .history-type.masuk) atau
+// "Terlambat" (merah, --red-500 — warna destruktif/peringatan yang sudah
+// dipakai konsisten di app ini utk elemen "perhatian", mis. hapus akun).
+// Dipakai di 2 tempat: riwayat ringkas Home (recent-row) dan halaman
+// Riwayat penuh (history-item) — style visualnya didefinisikan sekali di
+// CSS (.attendance-status-badge) supaya keduanya selalu tampil konsisten.
+function renderStatusBadge(status) {
+  if (status === 'ontime') {
+    return '<span class="attendance-status-badge ontime">Tepat Waktu</span>';
+  }
+  if (status === 'telat') {
+    return '<span class="attendance-status-badge telat">Terlambat</span>';
+  }
+  return '';
 }
 
 function formatFullHistoryDate(dateStr) {
@@ -2614,6 +2639,7 @@ function renderHistory(list) {
       <div class="history-info">
         <div class="history-top-row">
           <span class="history-type ${item.type === 'Masuk' ? 'masuk' : 'keluar'}">${item.type}</span>
+          ${item.type === 'Masuk' ? renderStatusBadge(item.status) : ''}
           <span class="history-date">${formatHistoryDate(item.date)}</span>
         </div>
         <div class="history-addr">${escapeHtml(item.address || '')}</div>

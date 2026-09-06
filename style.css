@@ -491,7 +491,7 @@ input { font-family: inherit; }
 #card-keluar:not(.filled):not(.locked):active { border-color: rgba(191,151,82,0.4); }
 .status-label { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.01em; }
 .status-value { font-family: var(--font-mono); font-size: 21px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); }
-.status-window { font-size: 10.5px; color: var(--text-tertiary); margin-top: 5px; letter-spacing: 0.005em; transition: color 0.2s ease; }
+.status-window { font-size: 10.5px; color: var(--text-tertiary); margin-top: 5px; letter-spacing: 0.005em; transition: color 0.2s ease; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 #card-masuk.filled .status-window { color: var(--sage-600); font-weight: 600; }
 #card-keluar.filled .status-window { color: var(--brass-600); font-weight: 600; }
 
@@ -1251,13 +1251,26 @@ input { font-family: inherit; }
     center / 24px no-repeat;
 }
 .history-info { flex: 1; min-width: 0; }
-.history-top-row { display: flex; align-items: center; gap: 8px; }
+.history-top-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 4px; }
 .history-type { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 100px; letter-spacing: 0.01em; }
 .history-type.masuk { background: rgba(122,154,110,0.18); color: var(--sage-600); }
 .history-type.keluar { background: rgba(191,151,82,0.2); color: var(--brass-600); }
-.history-date { font-size: 11px; color: var(--text-tertiary); }
+.history-date { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
 .history-addr { font-size: 12.5px; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-time { font-family: var(--font-mono); font-size: 13px; font-weight: 600; flex-shrink: 0; }
+
+/* Badge status telat/tepat waktu — dipakai di 3 tempat: riwayat ringkas Home
+   (.recent-row), halaman Riwayat penuh (.history-top-row), dan card status
+   hari ini (.status-window). Warna senada bahasa visual yang sudah ada di
+   app: hijau sage utk hal positif (sama seperti .history-type.masuk), merah
+   --red-500 utk hal yang perlu perhatian (sama seperti aksi Hapus Akun). */
+.attendance-status-badge {
+  display: inline-flex; align-items: center;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.01em;
+  padding: 2.5px 8px; border-radius: 100px; white-space: nowrap;
+}
+.attendance-status-badge.ontime { background: rgba(122,154,110,0.18); color: var(--sage-600); }
+.attendance-status-badge.telat { background: rgba(193,84,61,0.16); color: var(--red-500); }
 
 
 /* ============ RESPONSIVE ============ */

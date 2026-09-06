@@ -47,6 +47,15 @@
  *   baris di sheet Karyawan, foto profilnya, DAN seluruh riwayat absensi
  *   (sheet Log) beserta foto selfie-nya di Drive. Dipanggil dari menu
  *   "Hapus Akun" di layar Profil PWA. Tindakan ini tidak bisa dibatalkan.
+ * - Status TELAT / TEPAT WAKTU: setiap absen "Masuk" otomatis dinilai
+ *   terhadap jam kerja resmi — 08:00 WIB (Senin–Sabtu) atau 09:00 WIB
+ *   (Minggu & tanggal merah/cuti bersama nasional). Tanggal merah diambil
+ *   REALTIME dari API publik (bukan hardcode), di-cache 6 jam supaya cepat
+ *   & hemat quota, dengan 2 lapis fallback (API cadangan + data tersimpan
+ *   terakhir) kalau API utama sedang down. PENTING: pertama kali fungsi ini
+ *   jalan (Run/deploy), Apps Script akan minta izin baru "Connect to an
+ *   external service" — klik Authorize & Allow seperti biasa, ini normal
+ *   dan hanya muncul sekali.
  */
 
 const SHEET_KARYAWAN = 'Karyawan';
@@ -56,6 +65,25 @@ const PROFILE_FOLDER_NAME = 'Absensi - Foto Profil'; // folder terpisah khusus f
 const TZ = 'Asia/Jakarta';
 const EMPLOYEE_CACHE_SECONDS = 360;
 const LOG_CACHE_SECONDS = 120; // 2 menit — cukup singkat agar tetap akurat, cukup lama utk hindari baca sheet berulang
+
+/* ============================================
+   JAM KERJA & STATUS TELAT/TEPAT WAKTU
+   ------------------------------------------------
+   - Senin–Sabtu (hari kerja biasa): batas jam masuk 08:00 WIB.
+   - Minggu ATAU tanggal merah/cuti bersama nasional: batas jam masuk 09:00 WIB.
+   - Status HANYA berlaku untuk absen tipe "Masuk". Absen "Keluar" tidak
+     pernah dikategorikan telat/tepat waktu (tidak relevan secara bisnis).
+   ============================================ */
+const WORK_START_WEEKDAY = '08:00:00';   // Senin–Sabtu
+const WORK_START_HOLIDAY = '09:00:00';   // Minggu & tanggal merah nasional
+const HOLIDAY_CACHE_SECONDS = 21600;     // 6 jam — daftar libur setahun jarang berubah, tapi cukup sering refresh utk menangkap update cuti bersama baru
+// Dua sumber API hari libur nasional Indonesia dipakai BERLAPIS (bukan cuma
+// satu) — supaya kalau salah satu sedang down/limit (layanan gratis seperti
+// ini kadang begitu), status telat/ontime TETAP bisa dihitung dengan benar:
+// 1) Primary — data resmi SKB 3 Menteri (hari libur + cuti bersama), update rutin.
+// 2) Fallback — sumber independen kedua, dicoba hanya kalau primary gagal.
+const HOLIDAY_API_PRIMARY = 'https://api-hari-libur.vercel.app/api?year=';
+const HOLIDAY_API_FALLBACK = 'https://dayoffapi.vercel.app/api?year=';
 
 function doGet(e) {
   const action = e.parameter.action;
@@ -552,6 +580,11 @@ function recordAttendance(payload) {
     // BERIKUTNYA langsung baca data terbaru dari sheet, bukan data basi 2 menit lalu.
     invalidateLogCache(employeeId);
 
+    // Status telat/tepat waktu hanya relevan utk absen "Masuk" — dihitung
+    // langsung di sini juga (bukan cuma nanti pas refetch riwayat) supaya
+    // layar sukses absen bisa langsung menunjukkan hasilnya seketika.
+    const status = type === 'masuk' ? computeAttendanceStatus(today, timeStr) : null;
+
     return {
       ok: true,
       data: {
@@ -560,7 +593,8 @@ function recordAttendance(payload) {
         date: today,
         address: address || `${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)}`,
         photoUrl,
-        mapsLink
+        mapsLink,
+        status
       }
     };
   } finally {
@@ -587,7 +621,7 @@ function computeTodayStatus(rows) {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (row.date !== today) continue;
-    const entry = { time: row.time, address: row.address, photoUrl: row.photoUrl, mapsLink: row.mapsLink };
+    const entry = { time: row.time, address: row.address, photoUrl: row.photoUrl, mapsLink: row.mapsLink, status: row.status || null };
     if (row.type === 'Masuk' && !result.masuk) result.masuk = entry;
     if (row.type === 'Keluar' && !result.keluar) result.keluar = entry;
     if (result.masuk && result.keluar) break;
@@ -600,6 +634,112 @@ function computeTodayStatus(rows) {
    ============================================ */
 function getHistory(employeeId, limit) {
   return getEmployeeLogRowsCached(employeeId).slice(0, limit);
+}
+
+/* ============================================
+   DAFTAR HARI LIBUR NASIONAL (realtime, per tahun)
+   ------------------------------------------------
+   Diambil dari API publik hari libur Indonesia, di-cache per TAHUN selama
+   6 jam di CacheService — jadi tidak pernah nge-fetch API di setiap absen
+   (lambat & boros quota), tapi tetap "realtime" karena refresh otomatis
+   beberapa kali sehari, cukup cepat menangkap update cuti bersama baru dari
+   pemerintah tanpa perlu redeploy script.
+   Kalau API sedang down/timeout, fallback ke cache LAMA (kalau masih ada di
+   CacheService walau sudah kadaluarsa nilainya tetap disimpan sbg fallback
+   di Properties) atau, kalau benar-benar tidak ada apa pun, anggap TIDAK ada
+   hari libur tambahan (aman: minimal Minggu tetap terhitung libur karena itu
+   dicek terpisah dari nama hari, bukan dari API).
+   Return: Set of 'yyyy-MM-dd' string yang merupakan tanggal merah nasional.
+   ============================================ */
+function getHolidaySet(year) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'holidays_v2_' + year;
+  const cached = cache.get(cacheKey);
+  if (cached) return new Set(JSON.parse(cached));
+
+  const props = PropertiesService.getScriptProperties();
+  const fallbackKey = 'holidays_fallback_v2_' + year;
+
+  const dates = fetchHolidayDates(HOLIDAY_API_PRIMARY, year) || fetchHolidayDates(HOLIDAY_API_FALLBACK, year);
+
+  if (dates) {
+    cache.put(cacheKey, JSON.stringify(dates), HOLIDAY_CACHE_SECONDS);
+    // Simpan juga ke Properties (tidak kadaluarsa) sebagai fallback jangka
+    // panjang kalau suatu saat KEDUA API di atas down berkepanjangan.
+    try { props.setProperty(fallbackKey, JSON.stringify(dates)); } catch (e) { /* abaikan kalau kepenuhan */ }
+    return new Set(dates);
+  }
+
+  // Kedua API gagal -> pakai data yang terakhir kali berhasil disimpan,
+  // walau sudah agak lama, jauh lebih baik daripada tidak ada sama sekali.
+  const savedFallback = props.getProperty(fallbackKey);
+  if (savedFallback) {
+    try { return new Set(JSON.parse(savedFallback)); } catch (e) { /* data korup, abaikan */ }
+  }
+  return new Set(); // benar-benar tidak ada data -> anggap tidak ada tanggal merah tambahan
+}
+
+// Mengambil & menormalkan daftar tanggal libur dari satu endpoint API.
+// Return array of 'yyyy-MM-dd' string kalau sukses, atau null kalau gagal
+// (network error, HTTP non-200, atau format respons tidak dikenali) —
+// null (bukan array kosong) supaya pemanggil tahu harus coba sumber lain,
+// beda dengan "API bilang memang tidak ada hari libur" yang valid berupa [].
+function fetchHolidayDates(baseUrl, year) {
+  try {
+    const resp = UrlFetchApp.fetch(baseUrl + year, {
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    if (resp.getResponseCode() !== 200) return null;
+
+    const json = JSON.parse(resp.getContentText());
+    // Beberapa API membungkus array-nya di field "data", beberapa langsung
+    // array di root — dukung dua-duanya biar tidak rapuh kalau ganti sumber.
+    const list = Array.isArray(json) ? json : (Array.isArray(json.data) ? json.data : null);
+    if (!list) return null;
+
+    return list
+      .map(item => item && (item.date || item.holiday_date))
+      .filter(d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d))
+      .map(d => d.slice(0, 10));
+  } catch (err) {
+    return null; // jaringan/parse error -> pemanggil akan coba sumber berikutnya
+  }
+}
+
+// true kalau tanggal (yyyy-MM-dd) adalah HARI LIBUR untuk keperluan jam
+// masuk kerja: hari Minggu ATAU tanggal merah nasional/cuti bersama.
+function isHolidayForAttendance(dateStr) {
+  const dayOfWeek = ymdDayOfWeek(dateStr);
+  if (dayOfWeek === null) return false;
+  if (dayOfWeek === 0) return true; // 0 = Minggu
+  const year = String(dateStr).slice(0, 4);
+  return getHolidaySet(year).has(dateStr);
+}
+
+// Menghitung hari-dalam-minggu (0=Minggu..6=Sabtu) LANGSUNG dari string
+// "yyyy-MM-dd" pakai rumus kalender (Zeller-like via Date.UTC), BUKAN lewat
+// `new Date(y, m, d)` biasa — supaya hasilnya tidak pernah terpengaruh oleh
+// timezone server tempat Apps Script dieksekusi (yang belum tentu WIB).
+// Tanggal ini sudah dalam WIB (ditulis oleh Utilities.formatDate(..., TZ, ...)
+// di recordAttendance), jadi hari-nya harus dihitung sebagai tanggal murni,
+// bukan di-reinterpretasi ke timezone lain yang bisa "meleset" ke hari sebelum/sesudahnya.
+function ymdDayOfWeek(dateStr) {
+  const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const utcDate = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return utcDate.getUTCDay();
+}
+
+// Menentukan status "ontime" / "telat" untuk SATU absen Masuk pada tanggal
+// & jam tertentu. Return null kalau bukan tipe yang relevan dinilai
+// (dipanggil pemanggil hanya untuk tipe "Masuk", lihat readEmployeeLogRows).
+function computeAttendanceStatus(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return null;
+  const threshold = isHolidayForAttendance(dateStr) ? WORK_START_HOLIDAY : WORK_START_WEEKDAY;
+  // Perbandingan string aman selama formatnya konsisten "HH:mm:ss" (zero-padded),
+  // yang memang selalu demikian karena ditulis oleh Utilities.formatDate di recordAttendance.
+  return String(timeStr) <= threshold ? 'ontime' : 'telat';
 }
 
 /* ============================================
@@ -647,13 +787,20 @@ function readEmployeeLogRows(employeeId) {
   for (let i = rows.length - 1; i >= 0; i--) {
     const [id, name, tipe, tanggalRaw, jamRaw, lat, lng, akurasi, alamat, fotoUrl, mapsLink] = rows[i];
     if (String(id) !== String(employeeId)) continue;
+    const date = normalizeDate(tanggalRaw);
+    const time = normalizeTime(jamRaw);
     out.push({
       type: tipe,
-      date: normalizeDate(tanggalRaw),
-      time: normalizeTime(jamRaw),
+      date: date,
+      time: time,
       address: alamat,
       photoUrl: fotoUrl,
-      mapsLink: mapsLink
+      mapsLink: mapsLink,
+      // Status telat/tepat waktu HANYA relevan utk "Masuk" — dihitung di sini
+      // (bukan disimpan permanen di sheet) supaya kalau kebijakan jam kerja
+      // berubah di kemudian hari, riwayat lama otomatis ikut terhitung ulang
+      // dengan aturan yang berlaku saat ini, bukan "membeku" dengan aturan lama.
+      status: tipe === 'Masuk' ? computeAttendanceStatus(date, time) : null
     });
   }
   return out;
